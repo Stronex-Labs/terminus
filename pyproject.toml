@@ -9,7 +9,7 @@ description = "End of All Trades — ruthless backtesting lab for long-only spot
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "Khaled", email = "khaled22.live@gmail.com" },
+    { name = "Stronex Labs" },
 ]
 requires-python = ">=3.10"
 keywords = [

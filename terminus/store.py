@@ -31,10 +31,10 @@ from typing import Any, Iterable
 
 
 # Default store lives in the user's home dir so the package is portable.
-# Override with ResearchStore(db_path=...) or via CLUCIBLE_DB env var.
+# Override with ResearchStore(db_path=...) or via TERMINUS_HOME env var.
 import os
 _DEFAULT_ROOT = Path(os.environ.get(
-    "CRUCIBLE_HOME",
+    "TERMINUS_HOME",
     str(Path.home() / ".terminus"),
 ))
 _RESEARCH_DIR = _DEFAULT_ROOT / "research"
