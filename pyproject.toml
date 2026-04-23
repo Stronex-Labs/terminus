@@ -44,9 +44,9 @@ dev = ["pytest>=7", "pytest-asyncio>=0.21", "ruff>=0.1"]
 terminus = "terminus.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/khaled22live/terminus"
-Documentation = "https://github.com/khaled22live/terminus/tree/main/docs"
-Issues = "https://github.com/khaled22live/terminus/issues"
+Homepage = "https://github.com/Stronex-Labs/terminus"
+Documentation = "https://github.com/Stronex-Labs/terminus/tree/main/docs"
+Issues = "https://github.com/Stronex-Labs/terminus/issues"
 
 [tool.setuptools.packages.find]
 include = ["terminus*"]

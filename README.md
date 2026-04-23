@@ -13,9 +13,10 @@ twice.
 Most backtesting tools let you cheat. You tune parameters on the full
 window, claim "75/25 train/test", and call it robust. Terminus doesn't.
 
-- **Every active year must be profitable** — frozen parameters walked
-  forward year by year. If your strategy had one losing year between 2018
-  and 2025, it's dropped.
+- **Near-perfect year-by-year record required** — frozen parameters walked
+  forward year by year. At most 2 losing years are tolerated, and each
+  losing year must be no worse than −10%. One bad year doesn't kill a
+  strategy; chronic losers do.
 - **Bear years count** — 2022 was −64% on BTC. Your strategy has to survive
   that with realistic fees and slippage.
 - **Multi-pair generalization required** — a strategy that only works on
