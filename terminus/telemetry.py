@@ -1,23 +1,24 @@
-"""Opt-in telemetry and community contribution hub for Terminus.
+"""Telemetry and community research hub for Terminus.
 
-Local telemetry is always-on (SQLite only — stays on your machine).
-Remote telemetry requires explicit opt-in via env var or CLI flag.
+Terminus builds a shared knowledge base: every sim result, walk-forward
+slice, portfolio, and engine performance metric is collected locally and
+optionally contributed to the community hub at hub.terminuslab.io.
 
-Opt-in:  TERMINUS_TELEMETRY=1  (or --telemetry flag)
-Opt-out: TERMINUS_TELEMETRY=0  (default)
+The hub is a federated backtesting database — when many users run Terminus
+across different pairs and timeframes, the aggregate picture of what works
+(and what doesn't) is far richer than any single user's runs.
 
-What is collected locally:
-  - Which CLI command ran, how long it took
-  - Aggregate sim counts, cache-hit rates, sims/sec
-  - Survivor counts and score distributions (no strategy params)
+Local telemetry:  always-on, written to SQLite (stays on your machine)
+Remote telemetry: opt-in via TERMINUS_TELEMETRY=1 or `terminus contribute`
 
-What is sent remotely (only when opted in):
-  - Same aggregate stats — no pair names, no trade data, no personal info
-  - Community contributions: family name, tier (major/mid/small), tf,
-    Calmar, bear-year return, year coverage — no individual trade records
+What is collected:
+  Full sim results    — pair, tf, family, all params, all metrics, trades_json
+  Walk-forward slices — per-year returns, DD, trades for every WF run
+  Portfolio results   — legs, weights, per-year breakdown, Sharpe/Calmar/DD
+  Engine perf         — sims/sec, cache hit rate, elapsed time per command
 
-Hub endpoint: https://hub.terminuslab.io/api/v1  (not yet live — stubs send to
-  a local no-op until the endpoint is deployed)
+Hub endpoint: https://hub.terminuslab.io/api/v1  (stub until live)
+Override:     TERMINUS_HUB_URL=http://localhost:8000/api/v1
 """
 from __future__ import annotations
 
@@ -25,7 +26,6 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field, asdict
 from typing import Any
 
 logger = logging.getLogger("terminus.telemetry")
@@ -34,31 +34,9 @@ HUB_BASE_URL = os.environ.get(
     "TERMINUS_HUB_URL",
     "https://hub.terminuslab.io/api/v1",
 )
-_REMOTE_ENABLED: bool | None = None  # lazy-resolve from env
 
+_REMOTE_ENABLED: bool | None = None
 
-# ---------------------------------------------------------------------------
-# Tier classification (for anonymising pair names in remote payloads)
-# ---------------------------------------------------------------------------
-
-_TIER_MAJORS = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT"}
-_TIER_MIDS = {
-    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "MATICUSDT", "DOTUSDT",
-    "LTCUSDT", "ATOMUSDT", "NEARUSDT", "TRXUSDT",
-}
-
-
-def pair_tier(pair: str) -> str:
-    if pair in _TIER_MAJORS:
-        return "major"
-    if pair in _TIER_MIDS:
-        return "mid"
-    return "small"
-
-
-# ---------------------------------------------------------------------------
-# Remote opt-in check
-# ---------------------------------------------------------------------------
 
 def remote_enabled() -> bool:
     global _REMOTE_ENABLED
@@ -74,204 +52,356 @@ def set_remote_enabled(enabled: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Event dataclass
+# Remote sender
 # ---------------------------------------------------------------------------
 
-@dataclass
-class TelemetryEvent:
-    event_type: str
-    payload: dict = field(default_factory=dict)
-    ts: float = field(default_factory=time.time)
+def _post(endpoint: str, payload: dict) -> dict:
+    """POST JSON to hub. Returns response dict or {"error": ...} on failure."""
+    try:
+        import httpx
+        resp = httpx.post(
+            f"{HUB_BASE_URL}/{endpoint}",
+            json=payload,
+            timeout=15.0,
+            headers={"User-Agent": "terminus-lab/0.1.0"},
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------
-# Local recorder (SQLite via store)
+# Local write helpers
 # ---------------------------------------------------------------------------
 
-def record_local(store, event: TelemetryEvent) -> None:
-    """Write event to telemetry_events table. Silently skips on any error."""
+def _write_event(store, event_type: str, payload: dict,
+                 remote_sent: bool = False) -> None:
     try:
         store._conn.execute(
-            "INSERT INTO telemetry_events(ts, event_type, manifest_id, payload_json)"
-            " VALUES (?,?,?,?)",
-            (event.ts, event.event_type,
-             store._current_manifest_id,
-             json.dumps(event.payload, default=str)),
+            "INSERT INTO telemetry_events"
+            "(ts, event_type, manifest_id, payload_json, remote_sent)"
+            " VALUES (?,?,?,?,?)",
+            (time.time(), event_type, store._current_manifest_id,
+             json.dumps(payload, default=str), 1 if remote_sent else 0),
         )
         store._conn.commit()
     except Exception as e:
         logger.debug(f"telemetry local write skipped: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Remote sender (stub — hub endpoint not yet live)
-# ---------------------------------------------------------------------------
-
-def _post(endpoint: str, payload: dict) -> dict:
-    """POST to hub. Returns response dict or error dict."""
+def _mark_sent(store, event_id: int) -> None:
     try:
-        import httpx
-        resp = httpx.post(
-            f"{HUB_BASE_URL}/{endpoint}",
-            json=payload,
-            timeout=8.0,
-            headers={"User-Agent": "terminus-lab/0.1.0"},
+        store._conn.execute(
+            "UPDATE telemetry_events SET remote_sent=1 WHERE id=?", (event_id,)
         )
-        if resp.status_code == 200:
-            return resp.json()
-        return {"error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def emit(store, event_type: str, payload: dict) -> None:
-    """Record event locally; optionally send to hub if opted in."""
-    ev = TelemetryEvent(event_type=event_type, payload=payload)
-    record_local(store, ev)
-    if remote_enabled():
-        resp = _post("events", {"event_type": event_type, **payload})
-        if "error" in resp:
-            logger.debug(f"telemetry remote skipped: {resp['error']}")
+        store._conn.commit()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
-# Named event helpers — called by sweep / walk_forward / portfolio / fetch
+# Engine / command performance events
 # ---------------------------------------------------------------------------
 
-def sweep_complete(store, *, pairs: list[str], tfs: list[str], configs_run: int,
-                   cached_hits: int, persisted: int, elapsed_sec: float) -> None:
-    emit(store, "sweep_complete", {
-        "n_pairs": len(pairs),
-        "n_tfs": len(tfs),
+def sweep_complete(store, *, pairs: list[str], tfs: list[str],
+                   configs_run: int, cached_hits: int, persisted: int,
+                   elapsed_sec: float) -> None:
+    payload = {
+        "pairs": pairs,
+        "tfs": tfs,
         "configs_run": configs_run,
         "cached_hits": cached_hits,
         "persisted": persisted,
         "elapsed_sec": round(elapsed_sec, 1),
         "sims_per_sec": round(configs_run / max(elapsed_sec, 1), 1),
         "cache_hit_rate": round(cached_hits / max(configs_run, 1), 3),
-    })
+    }
+    _write_event(store, "sweep_complete", payload)
+    if remote_enabled():
+        resp = _post("events/sweep", payload)
+        if "error" in resp:
+            logger.debug(f"telemetry remote failed: {resp['error']}")
 
 
 def walk_forward_complete(store, *, pair: str, timeframe: str,
                           n_configs: int, elapsed_sec: float) -> None:
-    emit(store, "walk_forward_complete", {
-        "pair_tier": pair_tier(pair),
+    payload = {
+        "pair": pair,
         "timeframe": timeframe,
         "n_configs": n_configs,
         "elapsed_sec": round(elapsed_sec, 1),
-    })
+    }
+    _write_event(store, "walk_forward_complete", payload)
+    if remote_enabled():
+        _post("events/walk_forward", payload)
 
 
 def portfolio_complete(store, *, n_legs: int, annual_ret: float,
-                       max_dd: float, sharpe: float) -> None:
-    emit(store, "portfolio_complete", {
+                       max_dd: float, sharpe: float,
+                       legs: list[dict] | None = None,
+                       year_breakdown: dict | None = None) -> None:
+    payload = {
         "n_legs": n_legs,
         "annual_ret": round(annual_ret, 2),
         "max_dd": round(max_dd, 2),
         "sharpe": round(sharpe, 2),
-    })
+        "legs": legs or [],
+        "year_breakdown": year_breakdown or {},
+    }
+    _write_event(store, "portfolio_complete", payload)
+    if remote_enabled():
+        _post("events/portfolio", payload)
 
 
 def fetch_complete(store, *, n_pairs: int, n_tfs: int,
                    total_bars: int, elapsed_sec: float) -> None:
-    emit(store, "fetch_complete", {
+    payload = {
         "n_pairs": n_pairs,
         "n_tfs": n_tfs,
         "total_bars": total_bars,
         "elapsed_sec": round(elapsed_sec, 1),
-    })
+    }
+    _write_event(store, "fetch_complete", payload)
+    if remote_enabled():
+        _post("events/fetch", payload)
 
 
 def filter_run(store, *, n_candidates: int, n_survivors: int,
                min_calmar: float) -> None:
-    emit(store, "filter_run", {
+    payload = {
         "n_candidates": n_candidates,
         "n_survivors": n_survivors,
         "min_calmar": min_calmar,
         "survival_rate": round(n_survivors / max(n_candidates, 1), 3),
-    })
+    }
+    _write_event(store, "filter_run", payload)
+    if remote_enabled():
+        _post("events/filter", payload)
 
 
 # ---------------------------------------------------------------------------
-# Community contribution — submit anonymised strategy performance to hub
+# Full sim result contribution
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ContribRecord:
-    sim_hash: str
-    family: str
-    pair_tier: str    # 'major' | 'mid' | 'small'
-    timeframe: str
-    calmar: float
-    total_return_pct: float
-    max_drawdown_pct: float
-    n_trades: int
-    bear_year_pct: float | None
-    years_tested: int
-    years_profitable: int
+def _sim_payload(sim_row: dict) -> dict:
+    """Build the full contribution payload from a sims table row."""
+    return {
+        "hash":              sim_row.get("hash"),
+        "pair":              sim_row.get("pair"),
+        "timeframe":         sim_row.get("timeframe"),
+        "config_name":       sim_row.get("config_name"),
+        "family":            sim_row.get("family"),
+        "tp_pct":            sim_row.get("tp_pct"),
+        "stop_pct":          sim_row.get("stop_pct"),
+        "max_hold_bars":     sim_row.get("max_hold_bars"),
+        "cooldown_bars":     sim_row.get("cooldown_bars"),
+        "exit_method":       sim_row.get("exit_method"),
+        "regime_filter":     sim_row.get("regime_filter"),
+        "date_start":        sim_row.get("date_start"),
+        "date_end":          sim_row.get("date_end"),
+        "fee_rate":          sim_row.get("fee_rate"),
+        "entry_slip":        sim_row.get("entry_slip"),
+        "stop_slip":         sim_row.get("stop_slip"),
+        "tp_slip":           sim_row.get("tp_slip"),
+        "timeout_slip":      sim_row.get("timeout_slip"),
+        "n_trades":          sim_row.get("n_trades"),
+        "win_rate_pct":      sim_row.get("win_rate_pct"),
+        "avg_pnl_pct":       sim_row.get("avg_pnl_pct"),
+        "net_avg_pnl_pct":   sim_row.get("net_avg_pnl_pct"),
+        "total_return_pct":  sim_row.get("total_return_pct"),
+        "final_balance":     sim_row.get("final_balance"),
+        "max_drawdown_pct":  sim_row.get("max_drawdown_pct"),
+        "trades_per_month":  sim_row.get("trades_per_month"),
+        "calmar":            sim_row.get("calmar"),
+        "trades_json":       sim_row.get("trades_json"),   # full trade list
+        "config_json":       sim_row.get("config_json"),
+    }
 
 
-def contribute_strategy(store, survivor) -> dict:
-    """Submit one survivor's anonymised performance to the community hub.
+def _wf_payload(wf_rows: list[dict]) -> list[dict]:
+    """Build walk-forward contribution payload — one entry per year slice."""
+    return [
+        {
+            "hash":              r.get("hash"),
+            "parent_config_hash": r.get("parent_config_hash"),
+            "pair":              r.get("pair"),
+            "timeframe":         r.get("timeframe"),
+            "mode":              r.get("mode"),
+            "year_label":        r.get("year_label"),
+            "date_start":        r.get("date_start"),
+            "date_end":          r.get("date_end"),
+            "config_name":       r.get("config_name"),
+            "config_json":       r.get("config_json"),
+            "n_trades":          r.get("n_trades"),
+            "win_rate_pct":      r.get("win_rate_pct"),
+            "total_return_pct":  r.get("total_return_pct"),
+            "max_drawdown_pct":  r.get("max_drawdown_pct"),
+            "trades_per_month":  r.get("trades_per_month"),
+            "trades_json":       r.get("trades_json"),
+        }
+        for r in wf_rows
+    ]
 
-    Returns the hub response dict. No-ops (returns error dict) if not opted in
-    or if the hub is unreachable.
+
+def contribute_sim(store, sim_hash: str) -> dict:
+    """Contribute one full sim result (+ its walk-forward slices) to the hub.
+
+    Always writes to local community_submissions. Sends to hub if opted in.
+    Returns the hub response or a local-only status dict.
     """
-    rec = ContribRecord(
-        sim_hash=survivor.sim_hash,
-        family=survivor.family,
-        pair_tier=pair_tier(survivor.pair),
-        timeframe=survivor.timeframe,
-        calmar=round(survivor.calmar, 4),
-        total_return_pct=round(survivor.total_return_pct, 2),
-        max_drawdown_pct=round(survivor.max_drawdown_pct, 2),
-        n_trades=survivor.n_trades,
-        bear_year_pct=round(survivor.bear_year_pct, 2) if survivor.bear_year_pct else None,
-        years_tested=survivor.years_tested,
-        years_profitable=survivor.years_profitable,
-    )
-    payload = asdict(rec)
+    sim_row = store.lookup_sim(sim_hash)
+    if sim_row is None:
+        return {"error": f"sim {sim_hash} not found in store"}
+    sim_row = dict(sim_row)
 
-    # Always persist to local community_submissions table
+    wf_rows = [dict(r) for r in store.get_wf_for(sim_hash, mode="frozen")]
+
+    sim_data = _sim_payload(sim_row)
+    wf_data = _wf_payload(wf_rows)
+
+    # Always persist to local community_submissions
     try:
         store._conn.execute(
             "INSERT OR IGNORE INTO community_submissions("
             "sim_hash, family, pair_tier, timeframe, calmar,"
             " total_return_pct, max_drawdown_pct, n_trades,"
-            " bear_year_pct, years_tested, years_profitable, submitted_at"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (rec.sim_hash, rec.family, rec.pair_tier, rec.timeframe,
-             rec.calmar, rec.total_return_pct, rec.max_drawdown_pct,
-             rec.n_trades, rec.bear_year_pct,
-             rec.years_tested, rec.years_profitable, time.time()),
+            " bear_year_pct, years_tested, years_profitable, submitted_at,"
+            " full_sim_json, wf_json"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                sim_hash,
+                sim_row.get("family", ""),
+                _pair_tier(sim_row.get("pair", "")),
+                sim_row.get("timeframe", ""),
+                sim_row.get("calmar", 0),
+                sim_row.get("total_return_pct", 0),
+                sim_row.get("max_drawdown_pct", 0),
+                sim_row.get("n_trades", 0),
+                _bear_year_from_wf(wf_rows),
+                len(wf_rows),
+                sum(1 for r in wf_rows if r.get("total_return_pct", 0) > 0),
+                time.time(),
+                json.dumps(sim_data, default=str),
+                json.dumps(wf_data, default=str),
+            ),
         )
         store._conn.commit()
     except Exception as e:
         logger.debug(f"community_submissions local write failed: {e}")
 
     if not remote_enabled():
-        return {"status": "local_only", "note": "set TERMINUS_TELEMETRY=1 to share"}
+        return {"status": "local_only"}
 
-    resp = _post("contribute", payload)
-    if "hub_id" in resp:
+    payload = {"sim": sim_data, "walk_forward": wf_data}
+    resp = _post("contribute/sim", payload)
+
+    if "hub_id" in resp or resp.get("status") == "ok":
         try:
             store._conn.execute(
-                "UPDATE community_submissions SET hub_response_json=? WHERE sim_hash=?",
-                (json.dumps(resp), rec.sim_hash),
+                "UPDATE community_submissions SET hub_response_json=?"
+                " WHERE sim_hash=?",
+                (json.dumps(resp), sim_hash),
             )
             store._conn.commit()
         except Exception:
             pass
+    elif "error" in resp:
+        logger.debug(f"hub contribute failed for {sim_hash}: {resp['error']}")
+
     return resp
 
 
-def contribute_batch(store, survivors: list, limit: int = 50) -> dict:
-    """Submit up to `limit` survivors to the community hub."""
-    submitted, errors = 0, 0
+def contribute_survivor(store, survivor) -> dict:
+    """Contribute a Survivor (from filter_sims) — shorthand for contribute_sim."""
+    return contribute_sim(store, survivor.sim_hash)
+
+
+def contribute_batch(store, survivors: list, limit: int = 200) -> dict:
+    """Contribute up to `limit` survivors to the community hub.
+
+    Skips any sim already submitted (UNIQUE constraint on sim_hash).
+    """
+    submitted, skipped, errors = 0, 0, 0
     for s in survivors[:limit]:
-        r = contribute_strategy(store, s)
-        if "error" in r:
+        # Check if already submitted
+        already = store._conn.execute(
+            "SELECT 1 FROM community_submissions WHERE sim_hash=? AND hub_response_json IS NOT NULL",
+            (s.sim_hash,),
+        ).fetchone()
+        if already:
+            skipped += 1
+            continue
+        resp = contribute_survivor(store, s)
+        if "error" in resp and resp.get("status") != "local_only":
             errors += 1
         else:
             submitted += 1
-    return {"submitted": submitted, "errors": errors, "total": min(len(survivors), limit)}
+    return {
+        "submitted": submitted,
+        "skipped_already_sent": skipped,
+        "errors": errors,
+        "total": min(len(survivors), limit),
+    }
+
+
+def contribute_all_sims(store, min_calmar: float = 0.0,
+                        limit: int = 10_000) -> dict:
+    """Contribute every sim in the store above min_calmar to the hub.
+
+    Useful for a first-time bulk upload of all local research results.
+    Skips sims already submitted.
+    """
+    rows = store.query(
+        "SELECT hash FROM sims WHERE calmar >= ? ORDER BY calmar DESC LIMIT ?",
+        (min_calmar, limit),
+    )
+    submitted, skipped, errors = 0, 0, 0
+    total = len(rows)
+    for i, row in enumerate(rows, 1):
+        h = row[0]
+        already = store._conn.execute(
+            "SELECT 1 FROM community_submissions WHERE sim_hash=?"
+            " AND hub_response_json IS NOT NULL",
+            (h,),
+        ).fetchone()
+        if already:
+            skipped += 1
+            continue
+        resp = contribute_sim(store, h)
+        if "error" in resp and resp.get("status") != "local_only":
+            errors += 1
+        else:
+            submitted += 1
+        if i % 100 == 0:
+            logger.info(f"contribute_all_sims: {i}/{total} processed")
+    return {"submitted": submitted, "skipped": skipped,
+            "errors": errors, "total": total}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_TIER_MAJORS = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT"}
+_TIER_MIDS = {
+    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "MATICUSDT", "DOTUSDT",
+    "LTCUSDT", "ATOMUSDT", "NEARUSDT", "TRXUSDT",
+}
+
+
+def _pair_tier(pair: str) -> str:
+    if pair in _TIER_MAJORS:
+        return "major"
+    if pair in _TIER_MIDS:
+        return "mid"
+    return "small"
+
+
+def _bear_year_from_wf(wf_rows: list[dict],
+                       bear_label: str = "2022") -> float | None:
+    for r in wf_rows:
+        if r.get("year_label") == bear_label:
+            return r.get("total_return_pct")
+    return None

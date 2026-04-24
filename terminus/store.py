@@ -195,6 +195,8 @@ CREATE TABLE IF NOT EXISTS community_submissions (
     years_tested        INTEGER NOT NULL,
     years_profitable    INTEGER NOT NULL,
     submitted_at        REAL NOT NULL,
+    full_sim_json       TEXT DEFAULT NULL,   -- complete SimRecord fields + trades_json
+    wf_json             TEXT DEFAULT NULL,   -- all walk-forward year slices + trades_json
     hub_response_json   TEXT DEFAULT NULL,
     UNIQUE(sim_hash)
 );

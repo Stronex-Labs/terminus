@@ -208,10 +208,13 @@ def cmd_portfolio(args):
                          max_corr=args.max_corr, target_annual_pct=args.target)
     m = r.get("metrics", {})
     telemetry.portfolio_complete(
-        store, n_legs=len(r.get("legs", [])),
+        store,
+        n_legs=len(r.get("legs", [])),
         annual_ret=m.get("annual_ret", 0),
         max_dd=m.get("max_dd", 0),
         sharpe=m.get("sharpe", 0),
+        legs=r.get("legs", []),
+        year_breakdown=r.get("year_breakdown", {}),
     )
     print(f"\nPortfolio ({len(r.get('legs', []))} legs):")
     print(f"  Annualized: {m.get('annual_ret', 0):.2f}%")
@@ -236,24 +239,38 @@ def cmd_contribute(args):
     if args.enable:
         telemetry.set_remote_enabled(True)
         print("Remote telemetry enabled for this session (TERMINUS_TELEMETRY=1).")
-        print("Add to your shell profile to persist.")
-    survivors = filter_sims(
-        store,
-        min_full_calmar=args.min_calmar,
-        min_trades_per_year=4,
-        min_total_trades=25,
-    )
-    if not survivors:
-        print("No survivors to contribute. Run walk-forward first.")
-        return
-    result = telemetry.contribute_batch(store, survivors, limit=args.limit)
+        print("Persist with:  export TERMINUS_TELEMETRY=1  (add to shell profile)")
+
+    if args.all:
+        print(f"Contributing ALL sims with Calmar >= {args.min_calmar}...")
+        result = telemetry.contribute_all_sims(
+            store, min_calmar=args.min_calmar, limit=args.limit,
+        )
+    else:
+        survivors = filter_sims(
+            store,
+            min_full_calmar=args.min_calmar,
+            min_trades_per_year=4,
+            min_total_trades=25,
+        )
+        if not survivors:
+            print("No survivors to contribute. Run walk-forward first.")
+            return
+        print(f"Contributing {min(len(survivors), args.limit)} survivors...")
+        result = telemetry.contribute_batch(store, survivors, limit=args.limit)
+
     print(
-        f"\nContribution: {result['submitted']} submitted, "
-        f"{result['errors']} errors, {result['total']} total."
+        f"\n  Submitted:  {result['submitted']}\n"
+        f"  Skipped:    {result.get('skipped_already_sent', result.get('skipped', 0))}"
+        f" (already contributed)\n"
+        f"  Errors:     {result['errors']}\n"
+        f"  Total:      {result['total']}"
     )
     if not telemetry.remote_enabled():
-        print("\nNote: saved locally only. Set TERMINUS_TELEMETRY=1 or use "
-              "--enable to share with the community hub.")
+        print(
+            "\nResults saved locally only.\n"
+            "Use --enable or set TERMINUS_TELEMETRY=1 to share with the community hub."
+        )
 
 
 # --- ml --------------------------------------------------------------------
@@ -353,13 +370,16 @@ def main():
     # contribute
     co = subp.add_parser(
         "contribute",
-        help="Submit anonymised strategy performance to the community hub.",
+        help="Submit full sim results and walk-forward data to the community hub.",
     )
-    co.add_argument("--min-calmar", type=float, default=1.5)
-    co.add_argument("--limit", type=int, default=50,
-                    help="Max survivors to submit per run.")
+    co.add_argument("--min-calmar", type=float, default=0.0,
+                    help="Include all sims at or above this Calmar (default 0 = all).")
+    co.add_argument("--limit", type=int, default=10_000,
+                    help="Max sims to submit per run.")
+    co.add_argument("--all", action="store_true",
+                    help="Submit every sim in the store (not just walk-forward survivors).")
     co.add_argument("--enable", action="store_true",
-                    help="Enable remote sharing (sets TERMINUS_TELEMETRY=1 this session).")
+                    help="Enable remote sharing for this session (TERMINUS_TELEMETRY=1).")
     co.set_defaults(func=cmd_contribute)
 
     # ml
