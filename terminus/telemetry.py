@@ -32,7 +32,7 @@ logger = logging.getLogger("terminus.telemetry")
 
 HUB_BASE_URL = os.environ.get(
     "TERMINUS_HUB_URL",
-    "https://hub.terminuslab.io/api/v1",
+    "https://terminus-hub.shatla-tech.workers.dev/api/v1",
 )
 
 _REMOTE_ENABLED: bool | None = None
