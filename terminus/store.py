@@ -170,6 +170,34 @@ CREATE TABLE IF NOT EXISTS portfolio_candidates (
     manifest_id         INTEGER NOT NULL,
     created_at          REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS telemetry_events (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                  REAL NOT NULL,
+    event_type          TEXT NOT NULL,
+    manifest_id         INTEGER DEFAULT NULL,
+    payload_json        TEXT DEFAULT NULL,
+    remote_sent         INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_telemetry_type ON telemetry_events(event_type);
+
+CREATE TABLE IF NOT EXISTS community_submissions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    sim_hash            TEXT NOT NULL,
+    family              TEXT NOT NULL,
+    pair_tier           TEXT NOT NULL,       -- 'major' | 'mid' | 'small'
+    timeframe           TEXT NOT NULL,
+    calmar              REAL NOT NULL,
+    total_return_pct    REAL NOT NULL,
+    max_drawdown_pct    REAL NOT NULL,
+    n_trades            INTEGER NOT NULL,
+    bear_year_pct       REAL DEFAULT NULL,
+    years_tested        INTEGER NOT NULL,
+    years_profitable    INTEGER NOT NULL,
+    submitted_at        REAL NOT NULL,
+    hub_response_json   TEXT DEFAULT NULL,
+    UNIQUE(sim_hash)
+);
 """
 
 

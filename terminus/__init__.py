@@ -7,6 +7,9 @@ Public API:
         walk_forward_frozen, filter_sims,
         greedy_portfolio,
     )
+
+ML (requires pip install terminus-lab[ml]):
+    from terminus.ml import RegimeClassifier, optimize_params
 """
 from __future__ import annotations
 
@@ -24,6 +27,7 @@ from .walk_forward import walk_forward_frozen, walk_forward_reopt_anchored
 from .filter import filter_sims, Survivor, survivor_report
 from .portfolio import greedy_portfolio, reconstruct_legs, correlation
 from .sweep import run_full_sweep
+from . import telemetry
 
 __all__ = [
     "__version__",
@@ -36,4 +40,5 @@ __all__ = [
     "filter_sims", "Survivor", "survivor_report",
     "greedy_portfolio", "reconstruct_legs", "correlation",
     "run_full_sweep",
+    "telemetry",
 ]

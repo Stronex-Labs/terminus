@@ -25,6 +25,7 @@ from .registry import build_all_configs, build_configs_with_regime
 from .indicators import build_btc_regime_series
 from .fetch import BinanceFetcher, load_or_fetch, cache_path, is_fresh
 from .simulate import slip_for
+from . import telemetry
 
 
 DEFAULT_PAIRS = [
@@ -183,9 +184,10 @@ def cmd_report(args):
         min_total_trades=args.min_trades_total,
         min_bear_return=args.min_bear_return,
         min_pairs_generalization=args.min_pairs_generalization,
-        require_every_year_profitable=True,
         include_frozen_wf=True,
     )
+    telemetry.filter_run(store, n_candidates=store.sim_count(),
+                         n_survivors=len(survivors), min_calmar=args.min_calmar)
     print(f"\n{len(survivors)} survivors\n")
     print(survivor_report(survivors, limit=args.top))
 
@@ -201,12 +203,17 @@ def cmd_portfolio(args):
         min_total_trades=25,
         min_bear_return=args.min_bear_return,
         min_pairs_generalization=3,
-        require_every_year_profitable=True,
     )
     r = greedy_portfolio(survivors[:args.pool], max_legs=args.max_legs,
                          max_corr=args.max_corr, target_annual_pct=args.target)
-    print(f"\nPortfolio ({len(r.get('legs', []))} legs):")
     m = r.get("metrics", {})
+    telemetry.portfolio_complete(
+        store, n_legs=len(r.get("legs", [])),
+        annual_ret=m.get("annual_ret", 0),
+        max_dd=m.get("max_dd", 0),
+        sharpe=m.get("sharpe", 0),
+    )
+    print(f"\nPortfolio ({len(r.get('legs', []))} legs):")
     print(f"  Annualized: {m.get('annual_ret', 0):.2f}%")
     print(f"  Sharpe: {m.get('sharpe', 0)}")
     print(f"  MaxDD: {m.get('max_dd', 0)}%")
@@ -220,6 +227,68 @@ def cmd_portfolio(args):
         print(f"\nPer-year:")
         for y, ret in sorted(yrs.items()):
             print(f"  {y}: {ret:+.2f}%")
+
+
+# --- contribute ------------------------------------------------------------
+
+def cmd_contribute(args):
+    store = get_store()
+    if args.enable:
+        telemetry.set_remote_enabled(True)
+        print("Remote telemetry enabled for this session (TERMINUS_TELEMETRY=1).")
+        print("Add to your shell profile to persist.")
+    survivors = filter_sims(
+        store,
+        min_full_calmar=args.min_calmar,
+        min_trades_per_year=4,
+        min_total_trades=25,
+    )
+    if not survivors:
+        print("No survivors to contribute. Run walk-forward first.")
+        return
+    result = telemetry.contribute_batch(store, survivors, limit=args.limit)
+    print(
+        f"\nContribution: {result['submitted']} submitted, "
+        f"{result['errors']} errors, {result['total']} total."
+    )
+    if not telemetry.remote_enabled():
+        print("\nNote: saved locally only. Set TERMINUS_TELEMETRY=1 or use "
+              "--enable to share with the community hub.")
+
+
+# --- ml --------------------------------------------------------------------
+
+def cmd_ml_regime(args):
+    print("Training regime classifier on BTC daily data...")
+    t0 = time.time()
+    try:
+        from .ml.regime import train_regime_classifier
+    except ImportError:
+        print("ML deps missing. Run: pip install terminus-lab[ml]")
+        return
+
+    df = _load_and_precompute("BTCUSDT", "1d", args.days)
+    if df is None:
+        print("No BTC daily data found. Run: terminus fetch --pairs BTCUSDT --tfs 1d")
+        return
+
+    clf = train_regime_classifier(df)
+    model_path = Path(args.output)
+    clf.save(model_path)
+    elapsed = time.time() - t0
+    print(
+        f"Regime model trained in {elapsed:.1f}s\n"
+        f"  Bars: {clf.trained_on_bars}\n"
+        f"  Train accuracy: {clf.train_accuracy:.1%}\n"
+        f"  Saved to: {model_path.with_suffix('.xgb')}"
+    )
+
+    # Preview the current regime
+    regime = clf.predict(df)
+    last_10 = regime.iloc[-10:]
+    print(f"\nLast 10 bars regime:")
+    for i, r in zip(df["ts"].iloc[-10:], last_10):
+        print(f"  {str(i)[:10]}  {r}")
 
 
 # --- main ------------------------------------------------------------------
@@ -280,6 +349,31 @@ def main():
     po.add_argument("--pool", type=int, default=60, help="Top-N pool before greedy select")
     po.add_argument("--target", type=float, default=25.0)
     po.set_defaults(func=cmd_portfolio)
+
+    # contribute
+    co = subp.add_parser(
+        "contribute",
+        help="Submit anonymised strategy performance to the community hub.",
+    )
+    co.add_argument("--min-calmar", type=float, default=1.5)
+    co.add_argument("--limit", type=int, default=50,
+                    help="Max survivors to submit per run.")
+    co.add_argument("--enable", action="store_true",
+                    help="Enable remote sharing (sets TERMINUS_TELEMETRY=1 this session).")
+    co.set_defaults(func=cmd_contribute)
+
+    # ml
+    ml_p = subp.add_parser("ml", help="Machine learning utilities.")
+    ml_sub = ml_p.add_subparsers(dest="ml_cmd", required=True)
+
+    ml_regime = ml_sub.add_parser("regime", help="Train regime classifier on BTC daily data.")
+    ml_regime.add_argument("--days", type=int, default=2920)
+    ml_regime.add_argument(
+        "--output",
+        default=str(Path.home() / ".terminus" / "regime_model"),
+        help="Output path (without extension; .xgb and .json written).",
+    )
+    ml_regime.set_defaults(func=cmd_ml_regime)
 
     args = p.parse_args()
     _setup_logging(args.verbose)
