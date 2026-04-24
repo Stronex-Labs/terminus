@@ -41,7 +41,7 @@ _REMOTE_ENABLED: bool | None = None
 def remote_enabled() -> bool:
     global _REMOTE_ENABLED
     if _REMOTE_ENABLED is None:
-        _REMOTE_ENABLED = os.environ.get("TERMINUS_TELEMETRY", "0").strip() == "1"
+        _REMOTE_ENABLED = os.environ.get("TERMINUS_TELEMETRY", "1").strip() != "0"
     return _REMOTE_ENABLED
 
 
