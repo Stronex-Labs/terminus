@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from .store import ResearchStore, get_store
+from .risk.metrics import compute_cvar
 
 
 logger = logging.getLogger("filter_survivors")
@@ -42,6 +43,7 @@ class Survivor:
     bear_year_pct: float | None
     family_pair_coverage: int
     score: float
+    cvar_95: float = 0.0
     full_row: dict = field(default_factory=dict)
 
 
@@ -89,6 +91,7 @@ def filter_sims(
     max_losing_year_severity: float = -10.0,
     bear_year_label: str = "2022",
     include_frozen_wf: bool = True,
+    max_cvar_95: float = 0.08,
 ) -> list[Survivor]:
     """Return surviving configs across all pairs/families in the store.
 
@@ -136,6 +139,16 @@ def filter_sims(
         if bear_ret is not None and bear_ret < min_bear_return:
             continue
 
+        # CVaR gate — tail risk filter on per-trade PnL distribution
+        trades = json.loads(r.get("trades_json") or "[]")
+        cvar_95 = 0.0
+        if trades:
+            import numpy as np
+            pnls = np.array([t.get("pnl_pct", 0.0) / 100.0 for t in trades])
+            cvar_95 = float(compute_cvar(pnls, 0.95))
+            if cvar_95 > max_cvar_95:
+                continue
+
         # Weakest year (among active)
         if active_years:
             weakest = min(y["total_return_pct"] for y in active_years)
@@ -167,6 +180,7 @@ def filter_sims(
             bear_year_pct=bear_ret,
             family_pair_coverage=effective_coverage,
             score=0.0,
+            cvar_95=cvar_95,
             full_row=r,
         )
         s.score = _score(s)
@@ -182,16 +196,16 @@ def survivor_report(survivors: list[Survivor], limit: int = 50) -> str:
     lines.append(
         f"{'Rank':>4}  {'Pair':<10} {'TF':<4} {'Family':<22}  "
         f"{'Ret':>8}  {'DD':>6}  {'Calm':>5}  "
-        f"{'Yrs':>5}  {'Bear':>7}  {'Weak':>7}  {'Cov':>3}  Score"
+        f"{'Yrs':>5}  {'Bear':>7}  {'Weak':>7}  {'CVaR95':>7}  {'Cov':>3}  Score"
     )
-    lines.append("-" * 120)
+    lines.append("-" * 130)
     for i, s in enumerate(survivors[:limit]):
         bear_s = f"{s.bear_year_pct:+.1f}%" if s.bear_year_pct is not None else "  -  "
         lines.append(
             f"{i+1:>4}. {s.pair:<10} {s.timeframe:<4} {s.family[:22]:<22}  "
             f"{s.total_return_pct:>+7.1f}% {s.max_drawdown_pct:>5.1f}% "
             f"{s.calmar:>5.2f}  {s.years_profitable}/{s.years_tested:<3} "
-            f"{bear_s:>7}  {s.weakest_year_pct:>+6.1f}%  {s.family_pair_coverage:>3}  "
-            f"{s.score:>6.1f}"
+            f"{bear_s:>7}  {s.weakest_year_pct:>+6.1f}%  {s.cvar_95:>6.1%}  "
+            f"{s.family_pair_coverage:>3}  {s.score:>6.1f}"
         )
     return "\n".join(lines)
