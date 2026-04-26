@@ -14,3 +14,6 @@ build/
 .ruff_cache/
 htmlcov/
 .coverage
+SESSION_HANDOFF.md
+TERMINUS_LOGO_BRIEF.md
+TERMINUS_STORY.md
