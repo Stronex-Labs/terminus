@@ -136,10 +136,18 @@ class RegimeClassifier:
 
     # --- Training ----------------------------------------------------------
 
-    def train(self, df: pd.DataFrame) -> "RegimeClassifier":
+    def train(
+        self, df: pd.DataFrame, bear_weight: float = 3.0
+    ) -> "RegimeClassifier":
         """Train on full DataFrame. Labels auto-generated from forward returns.
 
         Last FORWARD_BARS rows are dropped (no future label available).
+
+        Args:
+            df: OHLCV DataFrame
+            bear_weight: Sample weight multiplier for BEAR-labelled bars.
+                BlackRock AIM upweights negative regimes in training so the
+                model learns patterns robust during stress. Default 3.0×.
         """
         try:
             import xgboost as xgb
@@ -162,6 +170,12 @@ class RegimeClassifier:
         X = feat.loc[valid].values.astype(np.float32)
         y = np.array([_INT_MAP[labels.loc[i]] for i in valid], dtype=np.int32)
 
+        # Bear-weighted sample weights (Aladdin AIM technique):
+        # upweight bear samples so the model is penalised more heavily
+        # for missing a bear regime than for missing a bull regime.
+        sample_weight = np.ones(len(y), dtype=np.float32)
+        sample_weight[y == _INT_MAP[REGIME_BEAR]] = bear_weight
+
         self.feature_cols = list(feat.columns)
         self._model = xgb.XGBClassifier(
             n_estimators=200,
@@ -174,12 +188,13 @@ class RegimeClassifier:
             verbosity=0,
             random_state=42,
         )
-        self._model.fit(X, y)
+        self._model.fit(X, y, sample_weight=sample_weight)
         self.trained_on_bars = len(valid)
         self.train_accuracy = float((self._model.predict(X) == y).mean())
         logger.info(
             f"Regime model trained on {len(valid)} bars; "
-            f"train accuracy={self.train_accuracy:.1%}"
+            f"train accuracy={self.train_accuracy:.1%}; "
+            f"bear_weight={bear_weight}x"
         )
         return self
 
@@ -264,6 +279,117 @@ class RegimeClassifier:
 # Convenience entry point
 # ---------------------------------------------------------------------------
 
-def train_regime_classifier(btc_daily_df: pd.DataFrame) -> RegimeClassifier:
-    """Train a fresh regime classifier on BTC daily data."""
-    return RegimeClassifier().train(btc_daily_df)
+def train_regime_classifier(
+    btc_daily_df: pd.DataFrame,
+    bear_weight: float = 3.0,
+) -> RegimeClassifier:
+    """Train a fresh regime classifier on BTC daily data.
+
+    Args:
+        btc_daily_df: OHLCV DataFrame
+        bear_weight: sample weight multiplier for BEAR bars.
+            Upweighting bear samples (BlackRock AIM technique) forces the
+            model to learn patterns that are robust during stress periods.
+            Default 3.0 means bear bars count 3× in training loss.
+    """
+    return RegimeClassifier().train(btc_daily_df, bear_weight=bear_weight)
+
+
+# ---------------------------------------------------------------------------
+# GMM-based continuous regime scorer (Feature 10)
+# ---------------------------------------------------------------------------
+
+class RegimeScorer:
+    """Gaussian Mixture Model regime scorer — outputs continuous probabilities.
+
+    Unlike the XGBoost hard classifier, the GMM produces soft posterior
+    probabilities (bear_prob, chop_prob, bull_prob) per bar. This is closer
+    to how BlackRock AIM operates — a continuous regime intensity, not a
+    discrete label.
+
+    Usage:
+        scorer = RegimeScorer()
+        scorer.fit(btc_daily_df)
+        proba_df = scorer.score(btc_daily_df)
+        # Returns DataFrame with columns: bear_prob, chop_prob, bull_prob
+        # bear_intensity = proba_df['bear_prob']  — use for position scaling
+    """
+
+    def __init__(self, n_components: int = 3, random_state: int = 42) -> None:
+        self._gmm = None
+        self._n_components = n_components
+        self._random_state = random_state
+        self._bear_component: int = 0
+        self._bull_component: int = 2
+        self._chop_component: int = 1
+
+    def fit(self, df: pd.DataFrame) -> "RegimeScorer":
+        """Fit GMM on regime features. Auto-labels components by mean return."""
+        try:
+            from sklearn.mixture import GaussianMixture
+        except ImportError:
+            raise ImportError("pip install terminus-lab[ml]  # needs scikit-learn")
+
+        feat = _features(df).dropna()
+        if len(feat) < MIN_TRAIN_BARS:
+            raise ValueError(f"Need >= {MIN_TRAIN_BARS} bars; got {len(feat)}")
+
+        X = feat.values.astype(np.float32)
+        self._gmm = GaussianMixture(
+            n_components=self._n_components,
+            covariance_type="full",
+            random_state=self._random_state,
+            n_init=5,
+        )
+        self._gmm.fit(X)
+
+        # Identify which GMM component corresponds to bull/bear/chop
+        # by computing mean forward return per component
+        labels = self._gmm.predict(X)
+        close = df["close"].astype(float).reindex(feat.index)
+        fwd_ret = close.shift(-FORWARD_BARS) / close - 1
+
+        component_returns = {}
+        for c in range(self._n_components):
+            mask = labels == c
+            if mask.sum() > 0:
+                component_returns[c] = float(fwd_ret.reindex(feat.index)[mask].dropna().mean())
+            else:
+                component_returns[c] = 0.0
+
+        sorted_comps = sorted(component_returns.items(), key=lambda x: x[1])
+        # Lowest return = bear, middle = chop, highest = bull
+        self._bear_component = sorted_comps[0][0]
+        self._chop_component = sorted_comps[1][0]
+        self._bull_component = sorted_comps[2][0]
+
+        logger.info(
+            f"RegimeScorer fitted: bear={self._bear_component}, "
+            f"chop={self._chop_component}, bull={self._bull_component}"
+        )
+        return self
+
+    def score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Return DataFrame with bear_prob, chop_prob, bull_prob columns."""
+        if self._gmm is None:
+            raise RuntimeError("Call .fit() first")
+
+        feat = _features(df)
+        nan_mask = feat.isna().any(axis=1)
+        result = pd.DataFrame(
+            {"bear_prob": 0.33, "chop_prob": 0.34, "bull_prob": 0.33},
+            index=df.index,
+        )
+        valid_idx = feat.index[~nan_mask]
+        if len(valid_idx) > 0:
+            X = feat.loc[valid_idx].values.astype(np.float32)
+            proba = self._gmm.predict_proba(X)
+            result.loc[valid_idx, "bear_prob"] = proba[:, self._bear_component]
+            result.loc[valid_idx, "chop_prob"] = proba[:, self._chop_component]
+            result.loc[valid_idx, "bull_prob"] = proba[:, self._bull_component]
+
+        return result
+
+    def bear_intensity(self, df: pd.DataFrame) -> pd.Series:
+        """Return continuous bear probability per bar (0 = no bear, 1 = full bear)."""
+        return self.score(df)["bear_prob"]
