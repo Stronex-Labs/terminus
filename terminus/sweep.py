@@ -26,6 +26,8 @@ from .registry import (
 from .store import ResearchStore, SimRecord, hash_config, get_store
 from .simulate import simulate_fast, slip_for, tier_of
 from .indicators import precompute_all, precompute_v2, build_btc_regime_series
+from . import telemetry
+from .filter import filter_sims
 
 
 logger = logging.getLogger("sweep_runner")
@@ -125,6 +127,11 @@ def run_full_sweep(
     if exit_methods is None:
         exit_methods = all_exit_methods()
     store = get_store(store_path) if store_path else get_store()
+
+    # Retry any sims that failed to reach the hub in previous runs
+    retry_result = telemetry.retry_failed(store)
+    if retry_result["retried"]:
+        logger.info(f"[hub] retry_failed: {retry_result}")
 
     base_configs = build_all_configs()
     btc_regime = _build_btc_regime(days) if include_regime_wrap else None
@@ -257,4 +264,27 @@ def run_full_sweep(
         }
         logger.info(f"Sweep done: {summary}")
         store.log("INFO", "sweep summary", summary)
+
+        # Auto-contribute survivors to community hub (local always, remote if opted in)
+        try:
+            survivors = filter_sims(
+                store,
+                min_full_calmar=1.0,
+                min_trades_per_year=2,
+                min_total_trades=10,
+                include_frozen_wf=False,
+            )
+            if survivors:
+                contrib = telemetry.contribute_batch(store, survivors, limit=500)
+                logger.info(
+                    f"[hub] auto-contribute after sweep: "
+                    f"submitted={contrib['submitted']} "
+                    f"skipped={contrib['skipped_already_sent']} "
+                    f"errors={contrib['errors']}"
+                )
+                summary["hub_submitted"] = contrib["submitted"]
+                summary["hub_skipped"] = contrib["skipped_already_sent"]
+        except Exception as e:
+            logger.warning(f"[hub] auto-contribute failed (data safe locally): {e}")
+
         return summary

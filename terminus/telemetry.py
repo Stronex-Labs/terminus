@@ -346,6 +346,60 @@ def contribute_batch(store, survivors: list, limit: int = 200) -> dict:
     }
 
 
+def retry_failed(store, limit: int = 500) -> dict:
+    """Retry remote send for any locally-stored sims that never reached the hub.
+
+    Called automatically at the start of every sweep and walk-forward to
+    ensure no data is permanently lost due to transient network failures.
+    Sims that failed remote send have hub_response_json IS NULL in
+    community_submissions. Skips if remote is disabled.
+    """
+    if not remote_enabled():
+        return {"retried": 0, "succeeded": 0, "still_failed": 0}
+
+    try:
+        rows = store._conn.execute(
+            "SELECT sim_hash FROM community_submissions"
+            " WHERE hub_response_json IS NULL LIMIT ?",
+            (limit,),
+        ).fetchall()
+    except Exception as e:
+        logger.debug(f"retry_failed: could not query community_submissions: {e}")
+        return {"retried": 0, "succeeded": 0, "still_failed": 0}
+
+    retried = succeeded = still_failed = 0
+    for row in rows:
+        h = row[0]
+        sim_row = store.lookup_sim(h)
+        if sim_row is None:
+            continue
+        sim_row = dict(sim_row)
+        wf_rows = [dict(r) for r in store.get_wf_for(h, mode="frozen")]
+        payload = {"sim": _sim_payload(sim_row), "walk_forward": _wf_payload(wf_rows)}
+        resp = _post("contribute/sim", payload)
+        retried += 1
+        if "hub_id" in resp or resp.get("status") == "ok":
+            try:
+                store._conn.execute(
+                    "UPDATE community_submissions SET hub_response_json=?"
+                    " WHERE sim_hash=?",
+                    (json.dumps(resp), h),
+                )
+                store._conn.commit()
+            except Exception:
+                pass
+            succeeded += 1
+        else:
+            still_failed += 1
+        if retried % 50 == 0:
+            logger.info(f"retry_failed: {retried} retried, {succeeded} succeeded")
+
+    if retried:
+        logger.info(f"retry_failed complete: {retried} retried, "
+                    f"{succeeded} succeeded, {still_failed} still failed")
+    return {"retried": retried, "succeeded": succeeded, "still_failed": still_failed}
+
+
 def contribute_all_sims(store, min_calmar: float = 0.0,
                         limit: int = 10_000) -> dict:
     """Contribute every sim in the store above min_calmar to the hub.

@@ -147,6 +147,12 @@ def cmd_walk_forward(args):
     for r in rows:
         by_pair_tf.setdefault((r["pair"], r["timeframe"]), []).append(dict(r))
 
+    # Retry any previously failed hub submissions before starting new work
+    retry_result = telemetry.retry_failed(store)
+    if retry_result["retried"]:
+        print(f"[hub] retried {retry_result['retried']} failed submissions, "
+              f"{retry_result['succeeded']} succeeded")
+
     with store.manifest_scope("walk_forward", label=args.label or f"wf-top{args.top}"):
         for (pair, tf), group in by_pair_tf.items():
             pdf = _load_and_precompute(pair, tf, args.days)
@@ -171,6 +177,27 @@ def cmd_walk_forward(args):
                 except Exception as e:
                     logging.error(f"WF failed {pair} {tf} {name}: {e}")
     print("Walk-forward done.")
+
+    # Auto-contribute sims that now have walk-forward data
+    try:
+        survivors = filter_sims(
+            store,
+            min_full_calmar=args.min_calmar,
+            min_trades_per_year=2,
+            min_total_trades=10,
+            include_frozen_wf=True,
+        )
+        if survivors:
+            contrib = telemetry.contribute_batch(store, survivors, limit=500)
+            print(
+                f"[hub] auto-contributed {contrib['submitted']} sims "
+                f"({contrib['skipped_already_sent']} already sent, "
+                f"{contrib['errors']} errors)"
+            )
+        else:
+            print("[hub] no qualifying survivors to contribute")
+    except Exception as e:
+        print(f"[hub] auto-contribute failed (data safe locally): {e}")
 
 
 # --- report ----------------------------------------------------------------
