@@ -6,6 +6,8 @@
 <p align="center"><em>End of All Trades</em></p>
 
 <p align="center">
+  <a href="https://pypi.org/project/terminus-lab/"><img src="https://img.shields.io/pypi/v/terminus-lab?style=flat-square&color=blue" /></a>
+  <a href="https://pypi.org/project/terminus-lab/"><img src="https://img.shields.io/pypi/dm/terminus-lab?style=flat-square&color=blue&label=installs" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
   <img src="https://img.shields.io/badge/status-alpha-orange?style=flat-square" />
@@ -98,11 +100,19 @@ Terminus is **spot-only, halal-first**. Built by someone who can't use futures o
 
 ## Community Hub
 
-```
-https://terminus-hub.shatla-tech.workers.dev/api/v1
+**Leaderboard:** https://terminus-hub.shatla-tech.workers.dev
+
+After every `terminus sweep` and `terminus walk-forward`, Terminus automatically contributes your survivors to the community hub — no manual step needed. Sims are always stored locally first; remote send is retried on the next run if the network was down.
+
+To opt out:
+```bash
+export TERMINUS_TELEMETRY=0
 ```
 
-Contribute your sim results. Query the global leaderboard. Every user's runs feed the aggregate — rare pairs and exotic timeframes covered by people who care about them.
+To force-upload everything you've ever run:
+```bash
+terminus contribute --all
+```
 
 ---
 
