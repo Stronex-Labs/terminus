@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "terminus-lab"
-version = "0.1.1"
-description = "End of All Trades — ruthless backtesting lab for long-only spot strategies."
+version = "0.1.2"
+description = "End of All Trades. Ruthless backtesting lab for long-only spot strategies."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [

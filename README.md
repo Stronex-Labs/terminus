@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/github/stars/Stronex-Labs/terminus?style=flat-square" />
 </p>
 
-<p align="center"><strong>Where strategies go to prove themselves — or die.</strong></p>
+<p align="center"><strong>Where strategies go to prove themselves. Or die.</strong></p>
 
 ---
 
@@ -29,12 +29,12 @@ Most backtesting tools let you cheat. Terminus doesn't.
 
 ## Why Terminus
 
-- **Near-perfect walk-forward required** — frozen parameters tested year by year. At most 2 losing years tolerated, each no worse than −10%.
-- **Bear years count** — 2022 was −64% on BTC. Your strategy survives that or it doesn't ship.
-- **Multi-pair generalization required** — works on one pair? That's a curve fit. Terminus requires success across multiple pairs.
-- **Realistic execution** — fees, entry slippage, stop slippage, TP slippage, timeout slippage, cooldowns, max-hold. Tiered by market cap.
-- **Halal-first** — spot-only, no leverage, no shorts, no interest. Cash (stablecoin) is a valid position in bear regimes.
-- **Content-hashed cache** — every sim keyed by `hash(pair + tf + config + date_range + slippage + fee)`. Same inputs = instant cache hit.
+- **Near-perfect walk-forward required.** Frozen parameters tested year by year. At most 2 losing years tolerated, each no worse than -10%.
+- **Bear years count.** 2022 was -64% on BTC. Your strategy survives that or it doesn't ship.
+- **Multi-pair generalization required.** Works on one pair? That's a curve fit. Terminus requires success across multiple pairs.
+- **Realistic execution.** Fees, entry slippage, stop slippage, TP slippage, timeout slippage, cooldowns, max-hold. Tiered by market cap.
+- **Halal-first.** Spot-only, no leverage, no shorts, no interest. Cash (stablecoin) is a valid position in bear regimes.
+- **Content-hashed cache.** Every sim keyed by `hash(pair + tf + config + date_range + slippage + fee)`. Same inputs = instant cache hit.
 
 ---
 
@@ -78,13 +78,13 @@ terminus report --min-calmar 1.5 --min-bear-return -5
 | Module | What it does |
 |--------|-------------|
 | **Sweep engine** | Runs thousands of configs in parallel, skips cache hits |
-| **Walk-forward** | Frozen / anchored / rolling — calendar-year folds |
+| **Walk-forward** | Frozen / anchored / rolling, calendar-year folds |
 | **Portfolio builder** | Correlation-capped leg selection, blended Sharpe/Calmar |
 | **ML module** | XGBoost regime classifier (BULL/BEAR/CHOP) + WF-aware optimizer |
 | **Community hub** | Contribute sim results, query the global leaderboard |
 | **SQLite store** | Local 6-table schema, travels with your research |
 
-**30+ strategy families** — RSI, EMA/MACD crosses, Bollinger, Donchian, ATR breakouts, Ichimoku, Supertrend, Keltner, VWAP reclaim, Heikin Ashi, ROC momentum, and more.
+**30+ strategy families:** RSI, EMA/MACD crosses, Bollinger, Donchian, ATR breakouts, Ichimoku, Supertrend, Keltner, VWAP reclaim, Heikin Ashi, ROC momentum, and more.
 
 ---
 
@@ -94,7 +94,7 @@ Terminus is **pessimistic by default**. It will tell you your strategy doesn't w
 
 Terminus is **reproducible by design**. The content-hash cache means any claim in a report traces back to the exact inputs that produced it. `sims.db` travels with your conclusions.
 
-Terminus is **spot-only, halal-first**. Built by someone who can't use futures or margin. If you have those tools, you have more alpha. If you don't — Terminus fits your constraints natively.
+Terminus is **spot-only, halal-first**. Built by someone who can't use futures or margin. If you have those tools, you have more alpha. If you don't, Terminus fits your constraints natively.
 
 ---
 
@@ -102,7 +102,7 @@ Terminus is **spot-only, halal-first**. Built by someone who can't use futures o
 
 **Leaderboard:** https://terminus-hub.shatla-tech.workers.dev
 
-After every `terminus sweep` and `terminus walk-forward`, Terminus automatically contributes your survivors to the community hub — no manual step needed. Sims are always stored locally first; remote send is retried on the next run if the network was down.
+After every `terminus sweep` and `terminus walk-forward`, Terminus automatically contributes your survivors to the community hub. No manual step needed. Sims are always stored locally first; remote send is retried on the next run if the network was down.
 
 To opt out:
 ```bash
@@ -136,4 +136,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT. Use it, fork it, ship it. If you find something useful, open a PR — the community sim database grows stronger with every contributor.
+MIT. Use it, fork it, ship it. If you find something useful, open a PR. The community sim database grows stronger with every contributor.
