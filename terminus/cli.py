@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,6 +29,58 @@ from .indicators import build_btc_regime_series
 from .fetch import BinanceFetcher, load_or_fetch, cache_path, is_fresh
 from .simulate import slip_for
 from . import telemetry
+
+
+_UPDATE_CACHE = Path.home() / ".terminus" / ".last_update_check"
+_PYPI_URL = "https://pypi.org/pypi/terminus-lab/json"
+_CHECK_INTERVAL_S = 86400  # once per day
+
+
+def _current_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("terminus-lab")
+    except Exception:
+        return "0.0.0"
+
+
+def _check_and_upgrade():
+    """Silently upgrade if a newer version is on PyPI. Runs at most once per day."""
+    if os.environ.get("TERMINUS_NO_UPDATE") == "1":
+        return
+    try:
+        now = time.time()
+        if _UPDATE_CACHE.exists():
+            if now - _UPDATE_CACHE.stat().st_mtime < _CHECK_INTERVAL_S:
+                return
+        _UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        _UPDATE_CACHE.touch()
+
+        import httpx
+        resp = httpx.get(_PYPI_URL, timeout=3)
+        if resp.status_code != 200:
+            return
+        latest = resp.json()["info"]["version"]
+        current = _current_version()
+        if _version_tuple(latest) > _version_tuple(current):
+            print(f"[terminus] Updating {current} -> {latest} ...", flush=True)
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--upgrade",
+                 "terminus-lab", "-q"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print(f"[terminus] Updated. Re-running command...", flush=True)
+            os.execv(sys.executable, [sys.executable, "-m", "terminus.cli"] + sys.argv[1:])
+    except Exception:
+        pass  # never break the CLI over an update check
+
+
+def _version_tuple(v: str):
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except Exception:
+        return (0,)
 
 
 DEFAULT_PAIRS = [
@@ -424,6 +479,7 @@ def main():
 
     args = p.parse_args()
     _setup_logging(args.verbose)
+    _check_and_upgrade()
     return args.func(args)
 
 
