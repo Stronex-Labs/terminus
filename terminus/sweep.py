@@ -40,10 +40,11 @@ def _load_and_precompute(pair: str, tf: str, days: int,
                          cache_dir: Path | None = None) -> pd.DataFrame | None:
     if cache_dir is None:
         cache_dir = DEFAULT_CACHE_DIR
-    path = cache_dir / f"{pair}_{tf}_{days}d.parquet"
+    path = cache_dir / f"{pair}_{tf}_{days}d.csv"
     if not path.exists():
         return None
-    df = pd.read_parquet(path)
+    from .fetch import _read_cache
+    df = _read_cache(path)
     if len(df) < 400:
         return None
     return precompute_v2(precompute_all(df))

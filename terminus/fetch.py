@@ -122,14 +122,30 @@ class BinanceFetcher:
         return df
 
 
-# --- Parquet cache -------------------------------------------------------
+# --- CSV cache -----------------------------------------------------------
+
+_CSV_DTYPES = {
+    "open_time": "int64",
+    "open": "float64",
+    "high": "float64",
+    "low": "float64",
+    "close": "float64",
+    "volume": "float64",
+}
+
 
 def cache_path(pair: str, tf: str, days: int,
                cache_dir: Path | None = None) -> Path:
     if cache_dir is None:
         cache_dir = Path.home() / ".terminus" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{pair}_{tf}_{days}d.parquet"
+    return cache_dir / f"{pair}_{tf}_{days}d.csv"
+
+
+def _read_cache(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path, dtype=_CSV_DTYPES)
+    df["ts"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    return df
 
 
 def is_fresh(path: Path, tf: str) -> bool:
@@ -137,7 +153,7 @@ def is_fresh(path: Path, tf: str) -> bool:
     if not path.exists():
         return False
     try:
-        df = pd.read_parquet(path, columns=["open_time"])
+        df = pd.read_csv(path, usecols=["open_time"], dtype={"open_time": "int64"})
     except Exception:
         return False
     if df.empty:
@@ -155,7 +171,7 @@ async def load_or_fetch(
     path = cache_path(pair, tf, days, cache_dir)
     if not force and is_fresh(path, tf):
         try:
-            return pd.read_parquet(path)
+            return _read_cache(path)
         except Exception as e:
             logger.warning("cache read failed for %s, refetching: %s", path, e)
 
@@ -163,7 +179,7 @@ async def load_or_fetch(
     if df is None or len(df) < 100:
         return df
     try:
-        df.to_parquet(path, compression="snappy")
+        df.drop(columns=["ts"], errors="ignore").to_csv(path, index=False)
     except Exception as e:
         logger.warning("cache write failed for %s: %s", path, e)
     return df
