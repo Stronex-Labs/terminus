@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Terminus" width="320"/>
+  <img src="https://raw.githubusercontent.com/Stronex-Labs/terminus/main/assets/logo.png" alt="Terminus" width="320"/>
 </p>
 
 <h1 align="center">Terminus</h1>
