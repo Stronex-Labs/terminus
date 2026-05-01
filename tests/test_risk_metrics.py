@@ -25,15 +25,28 @@ def _losing_returns(n=200):
     return RNG.normal(-0.01, 0.02, n)
 
 def _right_skewed(n=500):
-    """Many small losses, few large gains."""
-    base = RNG.normal(-0.005, 0.01, n)
-    base[RNG.integers(0, n, 20)] = 0.15  # fat right tail
+    """Many small losses, few large gains.
+
+    Uses a local fixed-seed RNG so the result is independent of how many
+    calls have been made on the global RNG before this function runs.
+    """
+    rng = np.random.default_rng(99)
+    base = rng.normal(-0.005, 0.01, n)
+    # Put distinct spikes at 40 unique positions (8% of bars) so the 95th
+    # percentile is reliably in the spike region regardless of sample size.
+    idx = rng.choice(n, size=40, replace=False)
+    base[idx] = 0.15  # fat right tail
     return base
 
 def _left_skewed(n=500):
-    """Many small gains, few large losses."""
-    base = RNG.normal(0.005, 0.01, n)
-    base[RNG.integers(0, n, 20)] = -0.15  # fat left tail
+    """Many small gains, few large losses.
+
+    Uses a local fixed-seed RNG for the same reason as _right_skewed.
+    """
+    rng = np.random.default_rng(101)
+    base = rng.normal(0.005, 0.01, n)
+    idx = rng.choice(n, size=40, replace=False)
+    base[idx] = -0.15  # fat left tail
     return base
 
 def _make_trades(pnl_pcts):

@@ -17,3 +17,37 @@ htmlcov/
 SESSION_HANDOFF.md
 TERMINUS_LOGO_BRIEF.md
 TERMINUS_STORY.md
+
+# Dev / research scratch files
+kline_cache/
+data_samples/
+results/
+node_modules/
+package.json
+package-lock.json
+
+# Screenshots and browser automation artefacts
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# ChatGPT / Gemini / CG browser automation scripts
+chatgpt_*.js
+chatgpt_*.json
+chatgpt_*.txt
+cg_*.txt
+cg_*.png
+gemini_*.js
+gemini_*.png
+gh_*.png
+list_tabs.js
+check_sessions.js
+download_*.js
+upload_*.js
+transcribe.py
+transcript.txt
+convo_*.txt
+terminus_posts.txt
+cg_terminus_posts.txt
+assets/
