@@ -477,6 +477,44 @@ def main():
     )
     ml_regime.set_defaults(func=cmd_ml_regime)
 
+    # terminus ml train — LightGBM screener training
+    ml_train = ml_sub.add_parser(
+        "train",
+        help="Train LightGBM screener model from sweep results.",
+    )
+    ml_train.add_argument("--calmar-threshold", type=float, default=1.5,
+                          help="Calmar threshold for positive label (default 1.5)")
+    ml_train.add_argument("--calmar-negative", type=float, default=0.3,
+                          help="Calmar threshold for negative label (default 0.3)")
+    ml_train.add_argument("--min-trades", type=int, default=10,
+                          help="Minimum trades per sim (default 10)")
+    ml_train.add_argument("--test-fraction", type=float, default=0.25,
+                          help="Test set fraction (default 0.25)")
+    ml_train.add_argument("--output", type=str, default=None,
+                          help="Output directory (default ~/.terminus/models/)")
+    ml_train.add_argument("--max-sims", type=int, default=0,
+                          help="Max sims to use (0=all)")
+    ml_train.add_argument("--no-funding", action="store_true",
+                          help="Disable funding rate features")
+    ml_train.add_argument("--no-fng", action="store_true",
+                          help="Disable fear/greed features")
+
+    def cmd_ml_train(args):
+        from terminus.ml.train import train
+        model_path = train(
+            calmar_positive=args.calmar_threshold,
+            calmar_negative=args.calmar_negative,
+            min_trades=args.min_trades,
+            test_fraction=args.test_fraction,
+            output_dir=args.output,
+            max_sims=args.max_sims,
+            use_funding=not args.no_funding,
+            use_fng=not args.no_fng,
+        )
+        print(f"Model saved to: {model_path}")
+
+    ml_train.set_defaults(func=cmd_ml_train)
+
     args = p.parse_args()
     _setup_logging(args.verbose)
     _check_and_upgrade()
