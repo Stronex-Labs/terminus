@@ -1,7 +1,7 @@
 """Regime classifier — labels each bar as bull / bear / chop.
 
 Replaces the simple BTC EMA50 > EMA200 binary filter with a 3-class
-XGBoost model trained on rolling features. The model is trained
+LightGBM model trained on rolling features. The model is trained
 walk-forward style: always on prior data only, never on future bars.
 
 Label generation (auto, from realized forward returns):
@@ -22,10 +22,10 @@ Features (all from the input OHLCV DataFrame):
 Usage:
     clf = train_regime_classifier(btc_daily_df)
     regime_series = clf.predict(btc_daily_df)  # 'bull'/'bear'/'chop' per bar
-    clf.save(Path("~/.terminus/regime_model.json"))
+    clf.save(Path("~/.terminus/regime_model"))
 
     # Load pre-trained
-    clf2 = RegimeClassifier.load(Path("~/.terminus/regime_model.json"))
+    clf2 = RegimeClassifier.load(Path("~/.terminus/regime_model"))
 """
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ def _auto_labels(df: pd.DataFrame, forward_bars: int = FORWARD_BARS) -> pd.Serie
 
 @dataclass
 class RegimeClassifier:
-    """XGBoost-backed 3-class regime classifier."""
+    """LightGBM-backed 3-class regime classifier."""
 
     _model: Any = field(default=None, repr=False)
     feature_cols: list[str] = field(default_factory=list)
@@ -146,13 +146,13 @@ class RegimeClassifier:
         Args:
             df: OHLCV DataFrame
             bear_weight: Sample weight multiplier for BEAR-labelled bars.
-                BlackRock AIM upweights negative regimes in training so the
-                model learns patterns robust during stress. Default 3.0×.
+                Upweighting bear samples forces the model to learn patterns
+                robust during stress periods. Default 3.0x.
         """
         try:
-            import xgboost as xgb
+            import lightgbm as lgb
         except ImportError:
-            raise ImportError("pip install terminus-lab[ml]  # needs xgboost")
+            raise ImportError("pip install terminus-lab[ml]  # needs lightgbm")
 
         feat = _features(df)
         labels = _auto_labels(df)
@@ -170,25 +170,30 @@ class RegimeClassifier:
         X = feat.loc[valid].values.astype(np.float32)
         y = np.array([_INT_MAP[labels.loc[i]] for i in valid], dtype=np.int32)
 
-        # Bear-weighted sample weights (Aladdin AIM technique):
+        # Bear-weighted sample weights:
         # upweight bear samples so the model is penalised more heavily
         # for missing a bear regime than for missing a bull regime.
         sample_weight = np.ones(len(y), dtype=np.float32)
         sample_weight[y == _INT_MAP[REGIME_BEAR]] = bear_weight
 
         self.feature_cols = list(feat.columns)
-        self._model = xgb.XGBClassifier(
+        self._model = lgb.LGBMClassifier(
             n_estimators=200,
             max_depth=4,
             learning_rate=0.05,
             subsample=0.8,
             colsample_bytree=0.8,
-            use_label_encoder=False,
-            eval_metric="mlogloss",
-            verbosity=0,
+            num_class=3,
+            objective="multiclass",
+            metric="multi_logloss",
+            verbosity=-1,
             random_state=42,
+            n_jobs=-1,
         )
-        self._model.fit(X, y, sample_weight=sample_weight)
+        self._model.fit(
+            X, y, sample_weight=sample_weight,
+            feature_name=self.feature_cols,
+        )
         self.trained_on_bars = len(valid)
         self.train_accuracy = float((self._model.predict(X) == y).mean())
         logger.info(
@@ -200,6 +205,24 @@ class RegimeClassifier:
 
     # --- Inference ---------------------------------------------------------
 
+    def _predict_raw(self, X: np.ndarray) -> np.ndarray:
+        """Predict class indices from feature matrix. Handles both Booster and Classifier."""
+        import lightgbm as lgb
+        if isinstance(self._model, lgb.Booster):
+            # Booster returns raw probabilities for multiclass
+            raw = self._model.predict(X)
+            return np.argmax(raw, axis=1).astype(int)
+        else:
+            return self._model.predict(X).astype(int)
+
+    def _predict_proba_raw(self, X: np.ndarray) -> np.ndarray:
+        """Predict probabilities from feature matrix. Handles both Booster and Classifier."""
+        import lightgbm as lgb
+        if isinstance(self._model, lgb.Booster):
+            return self._model.predict(X)
+        else:
+            return self._model.predict_proba(X)
+
     def predict(self, df: pd.DataFrame) -> pd.Series:
         """Return Series of 'bull'/'bear'/'chop' labels, same index as df."""
         if self._model is None:
@@ -210,8 +233,8 @@ class RegimeClassifier:
         valid_idx = feat.index[~nan_mask]
         if len(valid_idx):
             X = feat.loc[valid_idx].values.astype(np.float32)
-            preds = self._model.predict(X)
-            result.loc[valid_idx] = [_LABEL_MAP[p] for p in preds]
+            preds = self._predict_raw(X)
+            result.loc[valid_idx] = [_LABEL_MAP[int(p)] for p in preds]
         return result
 
     def predict_proba(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -228,7 +251,7 @@ class RegimeClassifier:
         valid_idx = feat.index[~nan_mask]
         if len(valid_idx):
             X = feat.loc[valid_idx].values.astype(np.float32)
-            p = self._model.predict_proba(X)
+            p = self._predict_proba_raw(X)
             proba.loc[valid_idx, REGIME_BEAR] = p[:, 0]
             proba.loc[valid_idx, REGIME_CHOP] = p[:, 1]
             proba.loc[valid_idx, REGIME_BULL] = p[:, 2]
@@ -243,24 +266,28 @@ class RegimeClassifier:
 
     def save(self, path: Path | str) -> None:
         try:
-            import xgboost as xgb
+            import lightgbm as lgb
         except ImportError:
             raise ImportError("pip install terminus-lab[ml]")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._model.save_model(str(path.with_suffix(".xgb")))
+        if isinstance(self._model, lgb.Booster):
+            self._model.save_model(str(path.with_suffix(".lgb")))
+        else:
+            # LGBMClassifier — get the underlying booster
+            self._model.booster_.save_model(str(path.with_suffix(".lgb")))
         meta = {
             "feature_cols": self.feature_cols,
             "trained_on_bars": self.trained_on_bars,
             "train_accuracy": self.train_accuracy,
         }
         path.with_suffix(".json").write_text(json.dumps(meta, indent=2))
-        logger.info(f"Regime model saved to {path.with_suffix('.xgb')}")
+        logger.info(f"Regime model saved to {path.with_suffix('.lgb')}")
 
     @classmethod
     def load(cls, path: Path | str) -> "RegimeClassifier":
         try:
-            import xgboost as xgb
+            import lightgbm as lgb
         except ImportError:
             raise ImportError("pip install terminus-lab[ml]")
         path = Path(path)
@@ -270,8 +297,9 @@ class RegimeClassifier:
             trained_on_bars=meta["trained_on_bars"],
             train_accuracy=meta["train_accuracy"],
         )
-        obj._model = xgb.XGBClassifier()
-        obj._model.load_model(str(path.with_suffix(".xgb")))
+        booster = lgb.Booster(model_file=str(path.with_suffix(".lgb")))
+        obj._booster = booster
+        obj._model = booster
         return obj
 
 
@@ -288,24 +316,23 @@ def train_regime_classifier(
     Args:
         btc_daily_df: OHLCV DataFrame
         bear_weight: sample weight multiplier for BEAR bars.
-            Upweighting bear samples (BlackRock AIM technique) forces the
-            model to learn patterns that are robust during stress periods.
-            Default 3.0 means bear bars count 3× in training loss.
+            Upweighting bear samples forces the model to learn patterns
+            robust during stress periods. Default 3.0 means bear bars
+            count 3x in training loss.
     """
     return RegimeClassifier().train(btc_daily_df, bear_weight=bear_weight)
 
 
 # ---------------------------------------------------------------------------
-# GMM-based continuous regime scorer (Feature 10)
+# GMM-based continuous regime scorer
 # ---------------------------------------------------------------------------
 
 class RegimeScorer:
     """Gaussian Mixture Model regime scorer — outputs continuous probabilities.
 
-    Unlike the XGBoost hard classifier, the GMM produces soft posterior
-    probabilities (bear_prob, chop_prob, bull_prob) per bar. This is closer
-    to how BlackRock AIM operates — a continuous regime intensity, not a
-    discrete label.
+    Unlike the LightGBM hard classifier, the GMM produces soft posterior
+    probabilities (bear_prob, chop_prob, bull_prob) per bar. This gives
+    continuous regime intensity, not a discrete label.
 
     Usage:
         scorer = RegimeScorer()

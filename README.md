@@ -18,7 +18,7 @@
   <br>
   <img src="https://img.shields.io/badge/Strategies-30-E67E22" alt="Strategies">
   <img src="https://img.shields.io/badge/Exit_Methods-6-7C3AED" alt="Exit Methods">
-  <img src="https://img.shields.io/badge/Timeframes-6-0F766E" alt="Timeframes">
+  <img src="https://img.shields.io/badge/Timeframes-8-0F766E" alt="Timeframes">
   <img src="https://img.shields.io/badge/Halal_First-Spot_Only-DAA520" alt="Halal First">
   <br>
   <a href="https://github.com/Stronex-Labs/terminus"><img src="https://img.shields.io/github/stars/Stronex-Labs/terminus?style=flat" alt="Stars"></a>
@@ -27,13 +27,17 @@
 <p align="center">
   <a href="#-why-terminus">Why</a> &nbsp;&middot;&nbsp;
   <a href="#-key-features">Features</a> &nbsp;&middot;&nbsp;
+  <a href="#-installation">Install</a> &nbsp;&middot;&nbsp;
   <a href="#-quickstart">Quickstart</a> &nbsp;&middot;&nbsp;
+  <a href="#-sweep-presets">Presets</a> &nbsp;&middot;&nbsp;
   <a href="#-cli-reference">CLI</a> &nbsp;&middot;&nbsp;
   <a href="#-strategy-families">Strategies</a> &nbsp;&middot;&nbsp;
   <a href="#-execution-model">Execution</a> &nbsp;&middot;&nbsp;
   <a href="#-ml-module">ML</a> &nbsp;&middot;&nbsp;
+  <a href="#-environment-variables">Env</a> &nbsp;&middot;&nbsp;
   <a href="#-community-hub">Hub</a> &nbsp;&middot;&nbsp;
   <a href="#-project-structure">Structure</a> &nbsp;&middot;&nbsp;
+  <a href="#-api--plugins">API</a> &nbsp;&middot;&nbsp;
   <a href="#-roadmap">Roadmap</a> &nbsp;&middot;&nbsp;
   <a href="#-contributing">Contributing</a>
 </p>
@@ -70,7 +74,7 @@ Runs thousands of configs in parallel. Content-hash dedup skips cache hits autom
 <td width="25%" valign="top">
 
 ### Walk-Forward
-Frozen and anchored modes with calendar-year folds. Bear year 2022 is the litmus test.
+Frozen and anchored modes with calendar-year folds. WFE ratio scores overfit risk. Bear year 2022 is the litmus test.
 
 </td>
 <td width="25%" valign="top">
@@ -82,7 +86,7 @@ Greedy correlation-capped leg selection. Sharpe-ranked with Calmar pre-filter. D
 <td width="25%" valign="top">
 
 ### ML Module
-LightGBM screener for config pre-filtering. XGBoost regime classifier (BULL/BEAR/CHOP). Walk-forward-aware optimizer.
+LightGBM screener for config pre-filtering. LightGBM regime classifier (BULL/BEAR/CHOP). Walk-forward-aware optimizer.
 
 </td>
 </tr>
@@ -116,15 +120,51 @@ All 6 are implemented in the simulator. The default sweep uses the 3 marked abov
 
 ---
 
-## 🚀 Quickstart
+## 📦 Installation
+
+### From PyPI (recommended)
 
 ```bash
 pip install terminus-lab
 ```
 
+### With ML support
+
 ```bash
-# 1. Fetch 8 years of data
-terminus fetch --pairs BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT --tfs 1h,4h,1d --days 2920
+pip install terminus-lab[ml]
+```
+
+This adds LightGBM and scikit-learn — everything needed for both the screener and regime classifier.
+
+### From source (development)
+
+```bash
+git clone https://github.com/Stronex-Labs/terminus.git
+cd terminus
+pip install -e ".[dev,ml]"
+```
+
+### Requirements
+
+- **Python 3.10+** (tested on 3.10, 3.11, 3.12, 3.13)
+- **Core deps:** numpy, pandas, pandas-ta, httpx
+- **ML deps (optional):** lightgbm, scikit-learn, joblib
+- **Storage:** ~2 GB for full 21-pair 8-year Parquet cache
+- **RAM:** 4 GB minimum, 8 GB recommended for full sweeps
+
+### Verify installation
+
+```bash
+terminus --help
+```
+
+---
+
+## 🚀 Quickstart
+
+```bash
+# 1. Fetch 8 years of data (21 pairs, 8 timeframes)
+terminus fetch
 
 # 2. Run the full parameter sweep
 terminus sweep
@@ -133,10 +173,19 @@ terminus sweep
 terminus walk-forward --top 15
 
 # 4. Generate the survivor report
-terminus report --min-calmar 1.5 --min-bear-return -2
+terminus report --min-calmar 1.5 --min-bear-return -5
 
 # 5. Build a portfolio from survivors
 terminus portfolio
+```
+
+### Minimal quick-run (single pair)
+
+```bash
+terminus fetch --pairs BTCUSDT --tfs 4h,1d --days 2920
+terminus sweep --pairs BTCUSDT --tfs 4h,1d
+terminus walk-forward --pairs BTCUSDT --top 5
+terminus report
 ```
 
 ### Example Output
@@ -154,40 +203,191 @@ terminus portfolio
 
 ---
 
-## 🖥 CLI Reference
+## 🎯 Sweep Presets
 
-| Command | Description |
-|---------|-------------|
-| `terminus fetch` | Download and cache Binance klines (Parquet) |
-| `terminus sweep` | Run full parameter sweep across all strategy families |
-| `terminus walk-forward` | Calendar-year walk-forward validation |
-| `terminus report` | Filter survivors and generate report |
-| `terminus portfolio` | Build correlation-capped portfolio from survivors |
-| `terminus contribute` | Upload sim results to the community hub |
-| `terminus ml regime` | Train XGBoost regime classifier |
-| `terminus ml train` | Train LightGBM screener from sweep results |
+Common sweep configurations for different use cases:
 
-<details>
-<summary><b>Common flags</b></summary>
+### Full discovery (default)
 
 ```bash
-# Fetch
-terminus fetch --pairs BTCUSDT,ETHUSDT --tfs 1h,4h,1d --days 2920
-
-# Sweep with specific exit methods
-terminus sweep --pairs BTCUSDT --exit-methods fixed_tp_stop,atr_trail
-
-# Walk-forward top N by Calmar
-terminus walk-forward --top 15
-
-# Report with custom filters
-terminus report --min-calmar 1.5 --min-bear-return -2 --min-trades-per-year 5
-
-# Portfolio with correlation cap
-terminus portfolio --max-corr 0.6 --target-ann-return 25
+terminus sweep
 ```
 
-</details>
+Runs all 21 pairs, all 8 timeframes, `fixed_tp_stop` exit method. ~10,000+ configs tested. Takes 30-60 minutes on a modern machine.
+
+### Extended exit methods
+
+```bash
+terminus sweep --exit-methods fixed_tp_stop,atr_trail,chandelier_trail,breakeven_after_1r,scale_out_half_at_1r
+```
+
+All exit methods enabled. 5x the configs. Multi-hour run.
+
+### Regime-gated only
+
+```bash
+terminus sweep --pairs BTCUSDT,ETHUSDT,SOLUSDT --tfs 4h,1d
+```
+
+Focus on majors with fewer timeframes for faster iteration.
+
+### No regime filter
+
+```bash
+terminus sweep --no-regime
+```
+
+Skips the `+BTCreg` variants. Half the config space, useful for pairs with limited BTC correlation.
+
+### Labeled runs
+
+```bash
+terminus sweep --label "q2-2026-majors"
+terminus walk-forward --label "q2-2026-wf"
+```
+
+Label manifests for organization and comparison between runs.
+
+---
+
+## 🖥 CLI Reference
+
+### `terminus fetch`
+
+Download and cache Binance klines as Parquet files.
+
+```bash
+terminus fetch [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--pairs` | All 21 pairs | Comma-separated pair list |
+| `--tfs` | `15m,30m,1h,2h,4h,6h,12h,1d` | Comma-separated timeframes |
+| `--days` | `2920` (8 years) | Days of history to fetch |
+| `--concurrency` | `3` | Parallel download workers |
+| `--force` | off | Re-download even if cached |
+
+### `terminus sweep`
+
+Run full parameter sweep across all strategy families.
+
+```bash
+terminus sweep [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--pairs` | All 21 pairs | Comma-separated pair list |
+| `--tfs` | All 8 timeframes | Comma-separated timeframes |
+| `--days` | `2920` | Data window (days) |
+| `--exit-methods` | `fixed_tp_stop` | Comma-separated exit methods |
+| `--no-regime` | off | Skip `+BTCreg` variants |
+| `--label` | auto | Manifest label for this run |
+
+### `terminus walk-forward`
+
+Calendar-year walk-forward validation of top candidates.
+
+```bash
+terminus walk-forward [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--top` | `15` | Top N candidates per pair/tf group |
+| `--min-calmar` | `1.5` | Minimum Calmar to qualify |
+| `--min-trades` | `25` | Minimum total trades to qualify |
+| `--days` | `2920` | Data window (days) |
+| `--pairs` | all | Filter to specific pairs |
+| `--label` | auto | Manifest label |
+
+### `terminus report`
+
+Filter survivors and print ranked report.
+
+```bash
+terminus report [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--min-calmar` | `1.5` | Minimum Calmar ratio |
+| `--min-trades-total` | `25` | Minimum total trades |
+| `--min-trades-per-year` | `4` | Minimum trades per year |
+| `--min-bear-return` | `-5.0` | Max allowed loss in 2022 (%) |
+| `--min-pairs-generalization` | `3` | Min pairs with same family winning |
+| `--top` | `100` | Show top N survivors |
+
+### `terminus portfolio`
+
+Build a correlation-capped portfolio from survivors.
+
+```bash
+terminus portfolio [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--min-calmar` | `1.5` | Filter threshold |
+| `--min-bear-return` | `-5.0` | Bear year filter |
+| `--max-legs` | `6` | Maximum portfolio legs |
+| `--max-corr` | `0.65` | Max pairwise correlation allowed |
+| `--pool` | `60` | Top-N pool before greedy select |
+| `--target` | `25.0` | Target annualized return (%) |
+
+### `terminus contribute`
+
+Upload sim results to the community hub.
+
+```bash
+terminus contribute [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--all` | off | Submit all sims (not just survivors) |
+| `--min-calmar` | `0.0` | Include sims above this Calmar |
+| `--limit` | `10000` | Max sims per submission |
+| `--enable` | off | Enable remote sharing for this session |
+
+### `terminus ml regime`
+
+Train the LightGBM regime classifier on BTC daily data.
+
+```bash
+terminus ml regime [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--days` | `2920` | Training data window |
+| `--output` | `~/.terminus/regime_model` | Output path (writes `.lgb` + `.json`) |
+
+### `terminus ml train`
+
+Train LightGBM screener from sweep results.
+
+```bash
+terminus ml train [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--calmar-threshold` | `1.5` | Calmar for positive label |
+| `--calmar-negative` | `0.3` | Calmar for negative label |
+| `--min-trades` | `10` | Minimum trades per sim |
+| `--test-fraction` | `0.25` | Test set split |
+| `--output` | `~/.terminus/models/` | Output directory |
+| `--max-sims` | `0` (all) | Limit training samples |
+| `--no-funding` | off | Disable funding rate features |
+| `--no-fng` | off | Disable Fear & Greed features |
+
+### Global flags
+
+| Flag | Description |
+|------|-------------|
+| `-v` / `--verbose` | Enable debug logging |
 
 ---
 
@@ -211,21 +411,24 @@ Entry fills at next bar's open. Stops fill at stop price with adverse slippage. 
 
 ## 🧠 ML Module
 
-> **Dependencies:** Install with `pip install terminus-lab[ml]` to get LightGBM and scikit-learn. XGBoost must be installed separately (`pip install xgboost`) for the regime classifier.
+> **Dependencies:** Install with `pip install terminus-lab[ml]` to get LightGBM and scikit-learn. All ML features (screener + regime classifier) are covered by this single extra.
 
 <details>
 <summary><b>LightGBM Screener</b></summary>
 
 Binary classifier trained on sweep results to predict which configs will have high Calmar. Reduces sweep time by pre-filtering low-probability configs.
 
+Features include: indicator parameters, timeframe encoding, pair volatility profile, funding rates, and Fear & Greed index.
+
 ```bash
 terminus ml train
+terminus ml train --calmar-threshold 2.0 --no-funding
 ```
 
 </details>
 
 <details>
-<summary><b>XGBoost Regime Classifier</b></summary>
+<summary><b>LightGBM Regime Classifier</b></summary>
 
 3-class classifier (BULL/BEAR/CHOP) trained on rolling features:
 
@@ -237,6 +440,7 @@ terminus ml train
 
 ```bash
 terminus ml regime
+terminus ml regime --days 3650 --output ./models/regime_v2
 ```
 
 </details>
@@ -247,6 +451,48 @@ terminus ml regime
 Random parameter search that respects walk-forward boundaries. Never optimizes on test data. Available as a library module (`terminus.ml.optim`) — not yet exposed via CLI.
 
 </details>
+
+---
+
+## 🔧 Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TERMINUS_TELEMETRY` | `1` | Set to `0` to disable community hub submissions |
+| `TERMINUS_NO_UPDATE` | `0` | Set to `1` to disable auto-update checks on PyPI |
+| `TERMINUS_HOME` | `~/.terminus` | Base directory for models, cache metadata, manifests |
+| `TERMINUS_HUB_URL` | *(built-in)* | Override the community hub endpoint URL |
+
+---
+
+## 🖥 Recommended Setup
+
+### Hardware
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| CPU | 4 cores | 8+ cores (parallelized sweep) |
+| RAM | 4 GB | 8-16 GB |
+| Disk | 2 GB (cache) | 5 GB (full data + sims.db) |
+| Network | Needed for fetch | Stable for initial data download |
+
+### Data coverage
+
+For robust walk-forward results, use **at least 4 years** of data (`--days 1460`). The default 8 years (`--days 2920`) ensures coverage of both bull (2021) and bear (2022) regimes.
+
+### Default pairs (21)
+
+```
+BTCUSDT  ETHUSDT  SOLUSDT  XRPUSDT  BNBUSDT  TRXUSDT  DOGEUSDT
+ADAUSDT  AVAXUSDT LINKUSDT MATICUSDT DOTUSDT  LTCUSDT  ATOMUSDT
+NEARUSDT SUIUSDT  APTUSDT  ARBUSDT  OPUSDT   TIAUSDT  INJUSDT
+```
+
+### Default timeframes (8)
+
+```
+15m  30m  1h  2h  4h  6h  12h  1d
+```
 
 ---
 
@@ -266,6 +512,9 @@ export TERMINUS_TELEMETRY=0
 
 # Force-upload everything
 terminus contribute --all
+
+# Enable sharing explicitly
+terminus contribute --enable
 ```
 
 ---
@@ -276,13 +525,13 @@ A strategy must pass **all** of these to be promoted:
 
 | Filter | Default | Rationale |
 |--------|---------|-----------|
-| Calmar ratio | ≥ 1.5 | Return must justify the drawdown |
-| Bear year (2022) | ≥ -2% | Survive -64% BTC without meaningful loss |
-| Losing years | ≤ 2 | Most years must be profitable |
-| Worst losing year | ≥ -10% | No single year wipes the account |
-| Trades per year | ≥ 5 | Enough sample size to be meaningful |
-| Multi-pair generalization | ≥ 5 pairs | Single-pair success = curve fit |
-| CVaR (95%) | ≤ 8% | Tail risk must be bounded |
+| Calmar ratio | >= 1.5 | Return must justify the drawdown |
+| Bear year (2022) | >= -2% | Survive -64% BTC without meaningful loss |
+| Losing years | <= 2 | Most years must be profitable |
+| Worst losing year | >= -10% | No single year wipes the account |
+| Trades per year | >= 5 | Enough sample size to be meaningful |
+| Multi-pair generalization | >= 5 pairs | Single-pair success = curve fit |
+| CVaR (95%) | <= 8% | Tail risk must be bounded |
 
 All thresholds are configurable via CLI flags (e.g. `--min-calmar`, `--min-bear-return`).
 
@@ -311,9 +560,10 @@ terminus/
 ├── sentiment.py        # Fear & Greed index
 ├── risk/
 │   ├── factor_model.py # Risk factor analytics
-│   └── metrics.py      # Sharpe, Calmar, max drawdown, etc.
+│   ├── metrics.py      # Sharpe, Calmar, max drawdown, etc.
+│   └── rademacher.py   # Rademacher-adjusted Sharpe (multiple-testing deflation)
 └── ml/
-    ├── regime.py       # XGBoost 3-class regime classifier
+    ├── regime.py       # LightGBM 3-class regime classifier
     ├── optim.py        # Walk-forward-aware random optimizer
     ├── features.py     # Feature engineering
     ├── dataset.py      # Dataset builder from sweep results
@@ -321,6 +571,27 @@ terminus/
 ```
 
 </details>
+
+---
+
+## 🔌 API & Plugins
+
+> **Status: Planned for v0.5+**
+
+### REST API (planned)
+
+A local HTTP server for programmatic access to sweep results, walk-forward data, and portfolio state. Will serve the web dashboard and expose JSON endpoints.
+
+### Plugin system (planned)
+
+Extensibility for:
+- Custom data sources (beyond Binance)
+- Custom exit methods
+- Custom strategy families
+- Custom portfolio construction algorithms
+- Result exporters (CSV, Notion, Telegram)
+
+Currently, new strategies are added by editing `terminus/registry.py` and `terminus/rules.py` directly. Plugin architecture will formalize this in v1.0.
 
 ---
 
@@ -356,11 +627,12 @@ Spot-only, no leverage, no shorts, no interest. Built by someone who can't use f
 | Phase | Feature | Status |
 |-------|---------|--------|
 | **v0.1** | Core sweep + walk-forward + report | ✅ Done |
-| **v0.2** | ML regime classifier + community hub | ✅ Done |
+| **v0.2** | ML regime classifier + community hub + LightGBM screener | ✅ Done |
 | **v0.3** | Portfolio optimization + risk analytics | 🔄 In progress |
 | **v0.4** | Alternative data sources (Kraken, OKX, Bybit) | 📋 Planned |
-| **v0.5** | Web dashboard for results visualization | 📋 Planned |
-| **v1.0** | Stable API + comprehensive test suite | 📋 Planned |
+| **v0.5** | Web dashboard + REST API | 📋 Planned |
+| **v0.6** | Plugin system + custom strategy loader | 📋 Planned |
+| **v1.0** | Stable public API + comprehensive test suite + docs | 📋 Planned |
 
 ---
 
@@ -372,6 +644,7 @@ PRs welcome for:
 - Portfolio construction methods
 - New walk-forward modes
 - Exit method variants
+- ML feature engineering
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -379,7 +652,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## ⚠ Disclaimer
 
-Terminus is a research tool. Past backtest performance does not guarantee future results. Always paper-trade validated strategies before risking real capital. The authors are not responsible for any financial losses.
+Terminus is a **research tool**. It is not financial advice.
+
+- Past backtest performance does not guarantee future results
+- Walk-forward validation reduces but does not eliminate overfitting risk
+- Always paper-trade validated strategies before risking real capital
+- The authors are not financial advisors and bear no responsibility for trading decisions made using this software
+- Crypto markets are volatile; you can lose your entire investment
+- This tool is provided "as-is" without warranty of any kind
 
 ---
 

@@ -105,6 +105,24 @@ def _run_slice(
         )
 
 
+def compute_wfe(in_sample_return: float, oos_return: float) -> float:
+    """Walk-Forward Efficiency = OOS return / IS return.
+
+    Measures how much in-sample performance survives out-of-sample.
+    WFE > 0.5 is good; WFE > 0.7 is excellent; WFE < 0.3 is likely overfit.
+
+    Args:
+        in_sample_return: total return from the in-sample (sweep) period
+        oos_return: total return from the out-of-sample (walk-forward) period
+
+    Returns:
+        WFE ratio (can be negative if OOS lost money)
+    """
+    if abs(in_sample_return) < 1e-9:
+        return 0.0
+    return oos_return / in_sample_return
+
+
 def walk_forward_frozen(
     df: pd.DataFrame, *,
     pair: str, timeframe: str, config_name: str, family: str,
@@ -112,8 +130,14 @@ def walk_forward_frozen(
     exit_method: str, parent_hash: str,
     fee_rate: float = 0.00075,
     store: ResearchStore | None = None,
+    in_sample_return: float | None = None,
 ) -> list[dict]:
-    """Run the SAME config on every year; persist per-year results."""
+    """Run the SAME config on every year; persist per-year results.
+
+    Args:
+        in_sample_return: If provided, WFE ratio is computed against
+            the average annualized OOS return. Stored in result metadata.
+    """
     if store is None:
         store = get_store()
     slip = slip_for(pair)
@@ -149,6 +173,15 @@ def walk_forward_frozen(
             "max_drawdown_pct": res["max_drawdown"],
             "win_rate_pct": res["win_rate"],
         })
+
+    # Compute WFE if in-sample return is provided
+    if in_sample_return is not None and results:
+        oos_returns = [r["total_return_pct"] for r in results]
+        avg_oos = sum(oos_returns) / len(oos_returns) if oos_returns else 0.0
+        wfe = compute_wfe(in_sample_return, avg_oos)
+        for r in results:
+            r["wfe"] = round(wfe, 3)
+
     return results
 
 

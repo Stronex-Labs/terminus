@@ -379,7 +379,7 @@ def cmd_ml_regime(args):
         f"Regime model trained in {elapsed:.1f}s\n"
         f"  Bars: {clf.trained_on_bars}\n"
         f"  Train accuracy: {clf.train_accuracy:.1%}\n"
-        f"  Saved to: {model_path.with_suffix('.xgb')}"
+        f"  Saved to: {model_path.with_suffix('.lgb')}"
     )
 
     # Preview the current regime
@@ -473,7 +473,7 @@ def main():
     ml_regime.add_argument(
         "--output",
         default=str(Path.home() / ".terminus" / "regime_model"),
-        help="Output path (without extension; .xgb and .json written).",
+        help="Output path (without extension; .lgb and .json written).",
     )
     ml_regime.set_defaults(func=cmd_ml_regime)
 
