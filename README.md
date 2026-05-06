@@ -16,7 +16,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License"></a>
   <img src="https://img.shields.io/badge/status-alpha-orange?style=flat" alt="Status">
   <br>
-  <img src="https://img.shields.io/badge/Strategies-30%2B-E67E22" alt="Strategies">
+  <img src="https://img.shields.io/badge/Strategies-30-E67E22" alt="Strategies">
   <img src="https://img.shields.io/badge/Exit_Methods-6-7C3AED" alt="Exit Methods">
   <img src="https://img.shields.io/badge/Timeframes-6-0F766E" alt="Timeframes">
   <img src="https://img.shields.io/badge/Halal_First-Spot_Only-DAA520" alt="Halal First">
@@ -50,7 +50,7 @@ Most backtesting tools make it easy to overfit. Terminus makes it **hard to chea
 
 - **Walk-forward required.** Frozen parameters tested year by year. At most 2 losing years tolerated, each no worse than -10%.
 - **Bear years count.** 2022 was -64% on BTC. Your strategy survives that or it doesn't ship.
-- **Multi-pair generalization.** Works on one pair? That's a curve fit. Terminus requires success across multiple pairs.
+- **Multi-pair generalization.** Works on one pair? That's a curve fit. Terminus requires success across at least 5 pairs.
 - **Realistic execution.** Tiered slippage by market cap, maker/taker fees, cooldowns, max-hold timeouts.
 - **Halal-first.** Spot-only, no leverage, no shorts, no interest. Cash is a valid position.
 - **Content-hashed cache.** Every sim keyed by `SHA-256(pair + tf + config + dates + slippage + fee)`. Same inputs = instant hit.
@@ -70,25 +70,25 @@ Runs thousands of configs in parallel. Content-hash dedup skips cache hits autom
 <td width="25%" valign="top">
 
 ### Walk-Forward
-Frozen, anchored, and 75/25 split modes. Calendar-year folds. Bear year 2022 is the litmus test.
+Frozen and anchored modes with calendar-year folds. Bear year 2022 is the litmus test.
 
 </td>
 <td width="25%" valign="top">
 
 ### Portfolio Builder
-Greedy correlation-capped leg selection. Blended Sharpe/Calmar ranking. Daily P&L reconstruction.
+Greedy correlation-capped leg selection. Sharpe-ranked with Calmar pre-filter. Daily P&L reconstruction.
 
 </td>
 <td width="25%" valign="top">
 
 ### ML Module
-XGBoost regime classifier (BULL/BEAR/CHOP). LightGBM screener. Walk-forward-aware optimizer.
+LightGBM screener for config pre-filtering. XGBoost regime classifier (BULL/BEAR/CHOP). Walk-forward-aware optimizer.
 
 </td>
 </tr>
 </table>
 
-### 30+ Strategy Families
+### 30 Strategy Families
 
 | Category | Families | Examples |
 |----------|----------|----------|
@@ -99,16 +99,20 @@ XGBoost regime classifier (BULL/BEAR/CHOP). LightGBM screener. Walk-forward-awar
 | **Price Action** | Heikin Ashi, pullback | `HA-reversal`, `EMA-pullback` |
 | **Composite** | Multi-indicator combos | `RSI+BB+MACD`, `EMA+Vol-confirm` |
 
+Each family also has a `+BTCreg` variant that gates entries on the BTC regime classifier, effectively doubling the config space to 60.
+
 ### 6 Exit Methods
 
-| Method | Description |
-|--------|-------------|
-| `fixed_tp_stop` | Fixed take-profit and stop-loss levels |
-| `atr_trail` | ATR-based trailing stop |
-| `chandelier_trail` | Chandelier exit (highest high minus ATR) |
-| `breakeven_after_1r` | Move stop to entry after 1R profit |
-| `fixed_with_breakeven` | Fixed TP/SL with breakeven at 1R |
-| `scale_out_half_at_1r` | Close 50% at 1R, trail the rest |
+| Method | Description | Default sweep |
+|--------|-------------|:---:|
+| `fixed_tp_stop` | Fixed take-profit and stop-loss levels | ✅ |
+| `atr_trail` | ATR-based trailing stop | — |
+| `chandelier_trail` | Chandelier exit (highest high minus ATR) | — |
+| `breakeven_after_1r` | Move stop to entry after 1R profit | ✅ |
+| `fixed_with_breakeven` | Fixed TP/SL with breakeven at 1R | — |
+| `scale_out_half_at_1r` | Close 50% at 1R, trail the rest | ✅ |
+
+All 6 are implemented in the simulator. The default sweep uses the 3 marked above; trail-based methods can be enabled with `--exit-methods`.
 
 ---
 
@@ -129,7 +133,7 @@ terminus sweep
 terminus walk-forward --top 15
 
 # 4. Generate the survivor report
-terminus report --min-calmar 1.5 --min-bear-return -5
+terminus report --min-calmar 1.5 --min-bear-return -2
 
 # 5. Build a portfolio from survivors
 terminus portfolio
@@ -160,7 +164,8 @@ terminus portfolio
 | `terminus report` | Filter survivors and generate report |
 | `terminus portfolio` | Build correlation-capped portfolio from survivors |
 | `terminus contribute` | Upload sim results to the community hub |
-| `terminus ml` | Train regime classifier or LightGBM screener |
+| `terminus ml regime` | Train XGBoost regime classifier |
+| `terminus ml train` | Train LightGBM screener from sweep results |
 
 <details>
 <summary><b>Common flags</b></summary>
@@ -176,7 +181,7 @@ terminus sweep --pairs BTCUSDT --exit-methods fixed_tp_stop,atr_trail
 terminus walk-forward --top 15
 
 # Report with custom filters
-terminus report --min-calmar 1.5 --min-bear-return -5 --min-trades-per-year 5
+terminus report --min-calmar 1.5 --min-bear-return -2 --min-trades-per-year 5
 
 # Portfolio with correlation cap
 terminus portfolio --max-corr 0.6 --target-ann-return 25
@@ -193,8 +198,8 @@ Terminus models **realistic execution**, not idealized fills:
 | Parameter | Majors | Mid-caps | Small-caps |
 |-----------|--------|----------|------------|
 | Entry slippage | 0.05% | 0.10% | 0.20% |
-| Stop slippage | 0.10% | 0.20% | 0.40% |
-| TP slippage | 0.02% | 0.04% | 0.08% |
+| Stop slippage | 0.10% | 0.15% | 0.30% |
+| TP slippage | 0.02% | 0.03% | 0.05% |
 | Timeout slippage | 0.05% | 0.10% | 0.20% |
 | Fee (per side) | 0.075% | 0.075% | 0.075% |
 
@@ -206,30 +211,32 @@ Entry fills at next bar's open. Stops fill at stop price with adverse slippage. 
 
 ## 🧠 ML Module
 
+> **Dependencies:** Install with `pip install terminus-lab[ml]` to get LightGBM and scikit-learn. XGBoost must be installed separately (`pip install xgboost`) for the regime classifier.
+
 <details>
-<summary><b>Regime Classifier</b></summary>
+<summary><b>LightGBM Screener</b></summary>
 
-XGBoost 3-class classifier trained on rolling features:
-
-- **BULL**: forward returns > +5%
-- **BEAR**: forward returns < -5%
-- **CHOP**: everything else
-
-10 features: RSI, EMA ratios, volatility, volume momentum, trend strength. Auto-labels from forward returns. Skips entries in wrong regime when enabled.
+Binary classifier trained on sweep results to predict which configs will have high Calmar. Reduces sweep time by pre-filtering low-probability configs.
 
 ```bash
-terminus ml --train-regime --pair BTCUSDT --tf 1d
+terminus ml train
 ```
 
 </details>
 
 <details>
-<summary><b>LightGBM Screener</b></summary>
+<summary><b>XGBoost Regime Classifier</b></summary>
 
-Trained on sweep results to predict which configs will have high Calmar. Reduces sweep time by pre-filtering low-probability configs.
+3-class classifier (BULL/BEAR/CHOP) trained on rolling features:
+
+- **BULL**: forward returns > +5%
+- **BEAR**: forward returns < -5%
+- **CHOP**: everything else
+
+10 features: RSI, EMA ratios, volatility, volume momentum, trend strength. Auto-labels from forward returns. Skips entries in wrong regime when enabled via `+BTCreg` strategy variants.
 
 ```bash
-terminus ml --train-screener
+terminus ml regime
 ```
 
 </details>
@@ -237,11 +244,7 @@ terminus ml --train-screener
 <details>
 <summary><b>Walk-Forward-Aware Optimizer</b></summary>
 
-Random parameter search that respects walk-forward boundaries. Never optimizes on test data.
-
-```bash
-terminus ml --optimize --pair BTCUSDT --tf 4h --family ATR-brk
-```
+Random parameter search that respects walk-forward boundaries. Never optimizes on test data. Available as a library module (`terminus.ml.optim`) — not yet exposed via CLI.
 
 </details>
 
@@ -271,15 +274,17 @@ terminus contribute --all
 
 A strategy must pass **all** of these to be promoted:
 
-| Filter | Threshold | Rationale |
-|--------|-----------|-----------|
+| Filter | Default | Rationale |
+|--------|---------|-----------|
 | Calmar ratio | ≥ 1.5 | Return must justify the drawdown |
-| Bear year (2022) | ≥ -10% | Survive -64% BTC without catastrophic loss |
+| Bear year (2022) | ≥ -2% | Survive -64% BTC without meaningful loss |
 | Losing years | ≤ 2 | Most years must be profitable |
 | Worst losing year | ≥ -10% | No single year wipes the account |
 | Trades per year | ≥ 5 | Enough sample size to be meaningful |
-| Multi-pair | ≥ 2 pairs | Single-pair success = curve fit |
-| Single-year outlier | < 60% of total | No one-year windfall disguised as edge |
+| Multi-pair generalization | ≥ 5 pairs | Single-pair success = curve fit |
+| CVaR (95%) | ≤ 8% | Tail risk must be bounded |
+
+All thresholds are configurable via CLI flags (e.g. `--min-calmar`, `--min-bear-return`).
 
 ---
 
@@ -294,10 +299,10 @@ terminus/
 ├── fetch.py            # Async Binance kline fetcher (Parquet cache)
 ├── simulate.py         # Vectorized trade simulator, 6 exit methods
 ├── sweep.py            # Parallel parameter sweep engine
-├── walk_forward.py     # Frozen / anchored / 75-25 modes
+├── walk_forward.py     # Frozen / anchored modes
 ├── filter.py           # Survivor filtering + report
 ├── portfolio.py        # Greedy correlation-capped portfolio builder
-├── registry.py         # Strategy family × parameter grid permutations
+├── registry.py         # Strategy family x parameter grid permutations
 ├── rules.py            # Vectorized entry signal rules (VRule)
 ├── indicators.py       # Two-layer indicator precompute (30+ indicators)
 ├── store.py            # SQLite research DB, content-hashed caching
