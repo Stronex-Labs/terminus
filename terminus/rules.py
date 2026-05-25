@@ -393,3 +393,208 @@ def with_btc_regime(base: VRule, btc_regime_series: pd.Series,
         return sig & regime
     # augment family name so it's distinguishable
     return VRule(f"{base.family}+BTCreg", dict(base.params, btc_reg=True), _f)
+
+
+# ---------------------------------------------------------------------------
+# v2+ rules — new strategy families
+# ---------------------------------------------------------------------------
+
+def mr_bb_rsi_divergence() -> VRule:
+    """Mean reversion: BB lower touch + RSI making higher low (divergence)."""
+    def _f(df):
+        low = _col(df, "low")
+        bb_lo = _col(df, "bb_lo")
+        rsi = pd.Series(_col(df, "rsi"))
+        ema200 = _col(df, "ema200")
+        close = _col(df, "close")
+        adx = _col(df, "adx")
+        # RSI minimum over last 10 bars (shifted by 1 to exclude current)
+        rsi_min10 = rsi.rolling(10, min_periods=5).min().shift(1).values
+        rsi_v = rsi.values
+        valid = (~np.isnan(low) & ~np.isnan(bb_lo) & ~np.isnan(rsi_v)
+                 & ~np.isnan(ema200) & ~np.isnan(adx) & ~np.isnan(rsi_min10))
+        touched = low <= bb_lo * 1.002
+        rsi_low = rsi_v < 35
+        rsi_recovering = rsi_v > rsi_min10  # higher low pattern
+        not_falling = close > ema200 * 0.97
+        ranging = adx < 30
+        return touched & rsi_low & rsi_recovering & not_falling & ranging & valid
+    return VRule("MR-BB-RSI-div", {}, _f)
+
+
+def mr_ema_deviation() -> VRule:
+    """Mean reversion: price >3% below EMA20, then recovery bar."""
+    def _f(df):
+        close = pd.Series(_col(df, "close"))
+        ema20 = pd.Series(_col(df, "ema20"))
+        rsi = _col(df, "rsi")
+        vr = _col(df, "vol_ratio")
+        # Deviation: close was >3% below EMA20 in last 3 bars
+        deviation = (close / ema20 - 1)  # negative when below
+        was_deviated = deviation.rolling(3, min_periods=1).min().values < -0.03
+        # Recovery: current close > previous close
+        pclose = close.shift(1).values
+        close_v = close.values
+        ema20_v = ema20.values
+        recovery = close_v > pclose
+        valid = (~np.isnan(close_v) & ~np.isnan(ema20_v) & ~np.isnan(pclose)
+                 & ~np.isnan(rsi) & ~np.isnan(vr))
+        return was_deviated & recovery & (rsi < 40) & (vr > 0.8) & valid
+    return VRule("MR-EMA-dev", {}, _f)
+
+
+def momentum_adx_surge() -> VRule:
+    """Momentum: ADX rising + price trending in bull stack."""
+    def _f(df):
+        adx = pd.Series(_col(df, "adx"))
+        adx_5ago = adx.shift(5).values
+        adx_v = adx.values
+        close = _col(df, "close")
+        ema20 = _col(df, "ema20")
+        ema50 = _col(df, "ema50")
+        rsi = _col(df, "rsi")
+        vr = _col(df, "vol_ratio")
+        valid = (~np.isnan(adx_v) & ~np.isnan(adx_5ago) & ~np.isnan(close)
+                 & ~np.isnan(ema20) & ~np.isnan(ema50) & ~np.isnan(rsi)
+                 & ~np.isnan(vr))
+        adx_strong = (adx_v > 25) & (adx_v > adx_5ago)
+        bull_stack = (close > ema20) & (ema20 > ema50)
+        rsi_zone = (rsi >= 55) & (rsi <= 75)
+        vol_ok = vr > 1.2
+        return adx_strong & bull_stack & rsi_zone & vol_ok & valid
+    return VRule("Mom-ADX-surge", {}, _f)
+
+
+def momentum_ema_accel() -> VRule:
+    """Momentum: EMA20-EMA50 gap widening (acceleration)."""
+    def _f(df):
+        ema20 = pd.Series(_col(df, "ema20"))
+        ema50 = pd.Series(_col(df, "ema50"))
+        ema200 = _col(df, "ema200")
+        close = _col(df, "close")
+        adx = _col(df, "adx")
+        gap = ema20 - ema50
+        prev_gap = gap.shift(1).values
+        gap_v = gap.values
+        ema20_v = ema20.values
+        ema50_v = ema50.values
+        valid = (~np.isnan(gap_v) & ~np.isnan(prev_gap) & ~np.isnan(ema200)
+                 & ~np.isnan(close) & ~np.isnan(adx))
+        widening = gap_v > prev_gap
+        full_stack = (close > ema20_v) & (ema20_v > ema50_v) & (ema50_v > ema200)
+        adx_ok = adx > 20
+        return widening & full_stack & adx_ok & valid
+    return VRule("Mom-EMA-accel", {}, _f)
+
+
+def breakout_range_expansion() -> VRule:
+    """Breakout: consolidation then volatility expansion with volume."""
+    def _f(df):
+        atr = pd.Series(_col(df, "atr"))
+        atr_sma20 = atr.rolling(20, min_periods=20).mean().values
+        atr_v = atr.values
+        close = _col(df, "close")
+        high = pd.Series(_col(df, "high"))
+        hh20 = high.rolling(20, min_periods=20).max().shift(1).values
+        vr = _col(df, "vol_ratio")
+        ema200 = _col(df, "ema200")
+        valid = (~np.isnan(atr_v) & ~np.isnan(atr_sma20) & ~np.isnan(hh20)
+                 & ~np.isnan(vr) & ~np.isnan(ema200))
+        expansion = atr_v > 1.5 * atr_sma20
+        breakout = close > hh20
+        vol_confirm = vr > 1.5
+        trend = close > ema200
+        return expansion & breakout & vol_confirm & trend & valid
+    return VRule("Brk-RangeExp", {}, _f)
+
+
+def pullback_fib_zone() -> VRule:
+    """Pullback: price retraces to 38-62% fib zone of recent swing in uptrend."""
+    def _f(df):
+        close = _col(df, "close")
+        high = pd.Series(_col(df, "high"))
+        low = pd.Series(_col(df, "low"))
+        ema20 = _col(df, "ema20")
+        ema50 = _col(df, "ema50")
+        ema200 = _col(df, "ema200")
+        rsi = _col(df, "rsi")
+        # Swing high = max of last 20 bars
+        swing_high = high.rolling(20, min_periods=10).max().values
+        # Swing low = min of bars 20-40 ago
+        swing_low = low.rolling(20, min_periods=10).min().shift(20).values
+        # Fib levels
+        swing_range = swing_high - swing_low
+        fib_382 = swing_high - 0.618 * swing_range  # 38.2% retrace from high
+        fib_618 = swing_high - 0.382 * swing_range  # 61.8% retrace from high
+        valid = (~np.isnan(close) & ~np.isnan(ema20) & ~np.isnan(ema50)
+                 & ~np.isnan(ema200) & ~np.isnan(rsi) & ~np.isnan(swing_high)
+                 & ~np.isnan(swing_low) & (swing_range > 0))
+        uptrend = (ema20 > ema50) & (ema50 > ema200)
+        in_fib = (close >= fib_382) & (close <= fib_618)
+        rsi_ok = (rsi >= 35) & (rsi <= 55)
+        return uptrend & in_fib & rsi_ok & valid
+    return VRule("PB-Fib-zone", {}, _f)
+
+
+def pullback_vwap_bounce() -> VRule:
+    """Pullback: price touches VWAP24 and bounces in uptrend."""
+    def _f(df):
+        close = _col(df, "close")
+        low = _col(df, "low")
+        vwap = _col(df, "v2_vwap24")
+        ema200 = _col(df, "ema200")
+        rsi = _col(df, "rsi")
+        valid = (~np.isnan(close) & ~np.isnan(low) & ~np.isnan(vwap)
+                 & ~np.isnan(ema200) & ~np.isnan(rsi))
+        uptrend = close > ema200
+        touched = low <= vwap * 1.003  # within 0.3%
+        bounced = close > vwap
+        rsi_ok = rsi < 55
+        return uptrend & touched & bounced & rsi_ok & valid
+    return VRule("PB-VWAP-bounce", {}, _f)
+
+
+def funding_fade() -> VRule:
+    """Funding rate fade: negative funding + technical support."""
+    def _f(df):
+        if "funding_8h" not in df.columns:
+            return np.zeros(len(df), dtype=bool)
+        funding = _col(df, "funding_8h")
+        close = _col(df, "close")
+        ema200 = _col(df, "ema200")
+        rsi = _col(df, "rsi")
+        vr = _col(df, "vol_ratio")
+        valid = (~np.isnan(funding) & ~np.isnan(close) & ~np.isnan(ema200)
+                 & ~np.isnan(rsi) & ~np.isnan(vr))
+        neg_funding = funding < -0.0001  # -0.01%
+        not_collapse = close > ema200 * 0.95
+        rsi_ok = rsi < 45
+        vol_ok = vr > 0.5
+        return neg_funding & not_collapse & rsi_ok & vol_ok & valid
+    return VRule("Funding-fade", {}, _f)
+
+
+def vol_squeeze_keltner() -> VRule:
+    """Volatility squeeze: BB inside Keltner, then breakout on release."""
+    def _f(df):
+        bb_up = pd.Series(_col(df, "bb_up"))
+        kelt_up = pd.Series(_col(df, "v2_kelt_up"))
+        close = _col(df, "close")
+        ema200 = _col(df, "ema200")
+        macd_hist = _col(df, "macd_hist")
+        bb_up_v = bb_up.values
+        kelt_up_v = kelt_up.values
+        # Was in squeeze in any of last 5 bars
+        squeeze = bb_up < kelt_up  # BB inside Keltner = squeeze
+        was_squeezed = squeeze.rolling(5, min_periods=1).max().shift(1).values.astype(bool)
+        # Current: squeeze released (BB now outside Keltner)
+        released = bb_up_v > kelt_up_v
+        # Breakout direction up
+        broke_up = close > bb_up_v
+        valid = (~np.isnan(bb_up_v) & ~np.isnan(kelt_up_v) & ~np.isnan(close)
+                 & ~np.isnan(ema200) & ~np.isnan(macd_hist)
+                 & ~np.isnan(was_squeezed))
+        trend = close > ema200
+        mom_pos = macd_hist > 0
+        return was_squeezed & released & broke_up & trend & mom_pos & valid
+    return VRule("Vol-Sqz-Kelt", {}, _f)

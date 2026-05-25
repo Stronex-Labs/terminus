@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -44,6 +44,8 @@ class Survivor:
     family_pair_coverage: int
     score: float
     cvar_95: float = 0.0
+    btc_trade_overlap: float = 0.0
+    tod_dow_info: dict = field(default_factory=dict)
     full_row: dict = field(default_factory=dict)
 
 
@@ -79,6 +81,142 @@ def _score(cand: Survivor) -> float:
     )
 
 
+def _single_year_outlier(active_years: list[dict], threshold: float = 0.60) -> bool:
+    """Return True if a single year provides >threshold of total positive return."""
+    positive = [y["total_return_pct"] for y in active_years if y["total_return_pct"] > 0]
+    if not positive:
+        return False
+    total_pos = sum(positive)
+    if total_pos <= 0:
+        return False
+    return max(positive) / total_pos > threshold
+
+
+def _btc_trade_overlap(
+    candidate_trades: list,
+    btc_trades: list,
+    window: int = 2,
+) -> float:
+    """Fraction of candidate entries that fall within ±window bars of a BTC entry.
+
+    Trades can be either dicts with 'bar'/'entry_ts' keys, or lists
+    [entry_ts, exit_ts, pnl_pct, exit_reason].
+    Uses entry_ts for correlation when bar index is unavailable.
+    """
+    if not candidate_trades or not btc_trades:
+        return 0.0
+
+    def _get_ts(t):
+        if isinstance(t, dict):
+            return t.get("entry_ts") or t.get("bar", -999)
+        elif isinstance(t, (list, tuple)) and len(t) >= 1:
+            return t[0]  # entry_ts is first element
+        return -999
+
+    btc_timestamps = sorted(_get_ts(t) for t in btc_trades)
+    if not btc_timestamps or btc_timestamps[0] == -999:
+        return 0.0
+
+    # Use timestamp proximity: ±window * avg_bar_duration
+    if len(btc_timestamps) >= 2:
+        durations = [btc_timestamps[i+1] - btc_timestamps[i]
+                     for i in range(min(20, len(btc_timestamps)-1))
+                     if btc_timestamps[i+1] > btc_timestamps[i]]
+        avg_bar_ms = sum(durations) / len(durations) if durations else 14400000
+    else:
+        avg_bar_ms = 14400000  # 4h default
+
+    tolerance = window * avg_bar_ms
+    overlap_count = 0
+    import bisect
+    for t in candidate_trades:
+        ts = _get_ts(t)
+        if ts == -999:
+            continue
+        idx = bisect.bisect_left(btc_timestamps, ts - tolerance)
+        if idx < len(btc_timestamps) and abs(btc_timestamps[idx] - ts) <= tolerance:
+            overlap_count += 1
+        elif idx > 0 and abs(btc_timestamps[idx-1] - ts) <= tolerance:
+            overlap_count += 1
+    return overlap_count / len(candidate_trades) if candidate_trades else 0.0
+
+
+def enrich_tod_dow(trades: list) -> dict:
+    """Return time-of-day / day-of-week enrichment from trade entry timestamps.
+
+    Trades can be dicts with 'entry_ts' and 'pnl_pct' keys, or lists
+    [entry_ts, exit_ts, pnl_pct, exit_reason].
+    Returns empty dict if fewer than 10 trades have timestamps.
+    """
+    import datetime as _dt
+
+    def _get_entry_ts(t):
+        if isinstance(t, dict):
+            return t.get("entry_ts")
+        elif isinstance(t, (list, tuple)) and len(t) >= 1:
+            return t[0]
+        return None
+
+    def _get_pnl(t):
+        if isinstance(t, dict):
+            return t.get("pnl_pct", 0.0)
+        elif isinstance(t, (list, tuple)) and len(t) >= 3:
+            return t[2]
+        return 0.0
+
+    stamped = [t for t in trades if _get_entry_ts(t)]
+    if len(stamped) < 10:
+        return {}
+
+    hour_wins: dict[int, int] = Counter()
+    hour_total: dict[int, int] = Counter()
+    dow_wins: dict[int, int] = Counter()
+    dow_total: dict[int, int] = Counter()
+
+    for t in stamped:
+        entry_ts = _get_entry_ts(t)
+        # entry_ts might be ms or seconds — normalize
+        if entry_ts > 1e12:
+            entry_ts = entry_ts / 1000.0
+        dt = _dt.datetime.fromtimestamp(entry_ts, tz=_dt.timezone.utc)
+        h = dt.hour
+        d = dt.weekday()  # 0=Mon .. 6=Sun
+        hour_total[h] += 1
+        dow_total[d] += 1
+        if _get_pnl(t) > 0:
+            hour_wins[h] += 1
+            dow_wins[d] += 1
+
+    def _win_rate(wins: dict, totals: dict, key: int) -> float:
+        t = totals.get(key, 0)
+        return wins.get(key, 0) / t if t > 0 else 0.0
+
+    hours_with_trades = sorted(hour_total.keys())
+    hour_wr = {h: _win_rate(hour_wins, hour_total, h) for h in hours_with_trades}
+    sorted_hours = sorted(hour_wr, key=hour_wr.get, reverse=True)  # type: ignore[arg-type]
+    best_hours = sorted_hours[:3]
+    worst_hours = sorted_hours[-3:] if len(sorted_hours) >= 3 else sorted_hours
+
+    days_with_trades = sorted(dow_total.keys())
+    dow_wr = {d: _win_rate(dow_wins, dow_total, d) for d in days_with_trades}
+    sorted_days = sorted(dow_wr, key=dow_wr.get, reverse=True)  # type: ignore[arg-type]
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    best_days = [day_names[d] for d in sorted_days[:2]]
+    worst_days = [day_names[d] for d in sorted_days[-2:]] if len(sorted_days) >= 2 else [day_names[d] for d in sorted_days]
+
+    total_trades = sum(hour_total.values())
+    top3_count = sum(hour_total.get(h, 0) for h in best_hours)
+    hour_concentration = top3_count / total_trades if total_trades > 0 else 0.0
+
+    return {
+        "best_hours": best_hours,
+        "worst_hours": worst_hours,
+        "best_days": best_days,
+        "worst_days": worst_days,
+        "hour_concentration": round(hour_concentration, 3),
+    }
+
+
 def filter_sims(
     store: ResearchStore | None = None, *,
     min_full_calmar: float = 1.5,
@@ -92,6 +230,9 @@ def filter_sims(
     bear_year_label: str = "2022",
     include_frozen_wf: bool = True,
     max_cvar_95: float = 0.08,
+    max_single_year_concentration: float = 0.60,
+    check_btc_correlation: bool = False,
+    btc_overlap_threshold: float = 0.70,
 ) -> list[Survivor]:
     """Return surviving configs across all pairs/families in the store.
 
@@ -133,6 +274,11 @@ def filter_sims(
                               for y in losing):
                 continue
 
+        # Single-year outlier gate
+        if include_frozen_wf and active_years:
+            if _single_year_outlier(active_years, max_single_year_concentration):
+                continue
+
         # Bear-year gate
         bear = next((y for y in wf if y["year_label"] == bear_year_label), None)
         bear_ret = bear["total_return_pct"] if bear else None
@@ -144,10 +290,34 @@ def filter_sims(
         cvar_95 = 0.0
         if trades:
             import numpy as np
-            pnls = np.array([t.get("pnl_pct", 0.0) / 100.0 for t in trades])
+            # Trades can be dicts or lists [entry_ts, exit_ts, pnl_pct, reason]
+            def _pnl(t):
+                if isinstance(t, dict):
+                    return t.get("pnl_pct", 0.0)
+                elif isinstance(t, (list, tuple)) and len(t) >= 3:
+                    return t[2]  # pnl_pct is 3rd element
+                return 0.0
+            pnls = np.array([_pnl(t) / 100.0 for t in trades])
             cvar_95 = float(compute_cvar(pnls, 0.95))
             if cvar_95 > max_cvar_95:
                 continue
+
+        # BTC trade-timestamp correlation (soft gate)
+        btc_overlap = 0.0
+        if trades and check_btc_correlation and r["pair"] != "BTCUSDT":
+            btc_rows = store.query(
+                "SELECT trades_json FROM sims WHERE family = ? AND pair = 'BTCUSDT'"
+                " AND calmar >= ? LIMIT 1",
+                (r["family"], min_full_calmar),
+            )
+            if btc_rows:
+                btc_trades = json.loads(btc_rows[0]["trades_json"] or "[]")
+                btc_overlap = _btc_trade_overlap(trades, btc_trades)
+                if btc_overlap > btc_overlap_threshold:
+                    continue
+
+        # Time-of-day / day-of-week enrichment
+        tod_dow = enrich_tod_dow(trades) if trades else {}
 
         # Weakest year (among active)
         if active_years:
@@ -181,6 +351,8 @@ def filter_sims(
             family_pair_coverage=effective_coverage,
             score=0.0,
             cvar_95=cvar_95,
+            btc_trade_overlap=btc_overlap,
+            tod_dow_info=tod_dow,
             full_row=r,
         )
         s.score = _score(s)

@@ -198,6 +198,71 @@ def build_v2_configs() -> list[tuple]:
                         rv.roc_momentum(n, mr), tp, stop, hold, 4,
                         f"ROC{n}"))
 
+    # --- NEW FAMILIES ---
+
+    # Mean Reversion: BB + RSI divergence
+    for tp, stop, hold in [(0.010, 0.015, 8), (0.015, 0.020, 12),
+                            (0.025, 0.025, 18)]:
+        out.append((f"MR-BB-RSI-div TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.mr_bb_rsi_divergence(), tp, stop, hold, 3,
+                    "MR-BB-RSI-div"))
+
+    # Mean Reversion: EMA deviation recovery
+    for tp, stop, hold in [(0.010, 0.015, 8), (0.015, 0.020, 12),
+                            (0.025, 0.025, 18)]:
+        out.append((f"MR-EMA-dev TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.mr_ema_deviation(), tp, stop, hold, 3,
+                    "MR-EMA-dev"))
+
+    # Momentum: ADX surge
+    for tp, stop, hold in [(0.030, 0.030, 24), (0.050, 0.040, 36),
+                            (0.070, 0.050, 48)]:
+        out.append((f"Mom-ADX-surge TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.momentum_adx_surge(), tp, stop, hold, 4,
+                    "Mom-ADX-surge"))
+
+    # Momentum: EMA acceleration
+    for tp, stop, hold in [(0.030, 0.030, 24), (0.050, 0.040, 36),
+                            (0.070, 0.050, 48)]:
+        out.append((f"Mom-EMA-accel TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.momentum_ema_accel(), tp, stop, hold, 4,
+                    "Mom-EMA-accel"))
+
+    # Breakout: Range expansion
+    for tp, stop, hold in [(0.040, 0.035, 30), (0.060, 0.045, 42),
+                            (0.080, 0.055, 48)]:
+        out.append((f"Brk-RangeExp TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.breakout_range_expansion(), tp, stop, hold, 4,
+                    "Brk-RangeExp"))
+
+    # Pullback: Fib zone
+    for tp, stop, hold in [(0.025, 0.020, 18), (0.040, 0.030, 30),
+                            (0.060, 0.040, 42)]:
+        out.append((f"PB-Fib-zone TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.pullback_fib_zone(), tp, stop, hold, 4,
+                    "PB-Fib-zone"))
+
+    # Pullback: VWAP bounce
+    for tp, stop, hold in [(0.025, 0.020, 18), (0.040, 0.030, 30),
+                            (0.060, 0.040, 42)]:
+        out.append((f"PB-VWAP-bounce TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.pullback_vwap_bounce(), tp, stop, hold, 4,
+                    "PB-VWAP-bounce"))
+
+    # Funding rate fade
+    for tp, stop, hold in [(0.015, 0.020, 12), (0.025, 0.030, 24),
+                            (0.040, 0.040, 36)]:
+        out.append((f"Funding-fade TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.funding_fade(), tp, stop, hold, 4,
+                    "Funding-fade"))
+
+    # Volatility squeeze: Keltner
+    for tp, stop, hold in [(0.030, 0.025, 24), (0.050, 0.035, 36),
+                            (0.070, 0.045, 48)]:
+        out.append((f"Vol-Sqz-Kelt TP{tp*100:.1f}/S{stop*100:.1f}",
+                    rv.vol_squeeze_keltner(), tp, stop, hold, 4,
+                    "Vol-Sqz-Kelt"))
+
     return out
 
 
