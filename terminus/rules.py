@@ -465,6 +465,25 @@ def momentum_adx_surge() -> VRule:
     return VRule("Mom-ADX-surge", {}, _f)
 
 
+def momentum_sniper(min_conditions: int = 3) -> VRule:
+    """Mom-sniper — N-of-4 momentum vote (faithful port of Stronex's live
+    rule_momentum_sniper, so terminus can validate the deployed family):
+      1) ema9 > ema20   2) rsi in [50,70]   3) vol_ratio > 1.3   4) adx > 20.
+    Fires when at least `min_conditions` of the 4 are true.
+    """
+    def _f(df):
+        ema9 = _col(df, "ema9"); ema20 = _col(df, "ema20")
+        rsi = _col(df, "rsi"); vr = _col(df, "vol_ratio"); adx = _col(df, "adx")
+        valid = (~np.isnan(ema9) & ~np.isnan(ema20) & ~np.isnan(rsi)
+                 & ~np.isnan(vr) & ~np.isnan(adx))
+        conds = ((ema9 > ema20).astype(int)
+                 + ((rsi >= 50) & (rsi <= 70)).astype(int)
+                 + (vr > 1.3).astype(int)
+                 + (adx > 20).astype(int))
+        return (conds >= min_conditions) & valid
+    return VRule("Mom-sniper", {"mc": min_conditions}, _f)
+
+
 def momentum_ema_accel() -> VRule:
     """Momentum: EMA20-EMA50 gap widening (acceleration)."""
     def _f(df):

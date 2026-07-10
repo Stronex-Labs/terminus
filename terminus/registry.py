@@ -221,6 +221,13 @@ def build_v2_configs() -> list[tuple]:
                     rv.momentum_adx_surge(), tp, stop, hold, 4,
                     "Mom-ADX-surge"))
 
+    # Mom-sniper — N-of-4 momentum vote (Stronex live family, ported to validate it)
+    for mc in (3, 4):
+        for tp, stop, hold in [(0.030, 0.035, 48), (0.040, 0.040, 36),
+                                (0.050, 0.045, 48)]:
+            out.append((f"Mom-sniper[{mc}of4] TP{tp*100:.1f}/S{stop*100:.1f}",
+                        rv.momentum_sniper(mc), tp, stop, hold, 2, "Mom-sniper"))
+
     # Momentum: EMA acceleration
     for tp, stop, hold in [(0.030, 0.030, 24), (0.050, 0.040, 36),
                             (0.070, 0.050, 48)]:

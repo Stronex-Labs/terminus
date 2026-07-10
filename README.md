@@ -97,7 +97,7 @@ LightGBM screener for config pre-filtering. LightGBM regime classifier (BULL/BEA
 | Category | Families | Examples |
 |----------|----------|----------|
 | **Trend** | EMA crosses, MACD, Supertrend, Ichimoku | `EMA9/21-cross`, `Ichi-bull+BTCreg` |
-| **Momentum** | RSI, ROC, Stochastic, Williams %R | `RSI-cross-30`, `ROC10+BTCreg` |
+| **Momentum** | RSI, ROC, Stochastic, Williams %R, ADX-surge, N-of-4 sniper | `RSI-cross-30`, `Mom-sniper[3of4]` |
 | **Volatility** | Bollinger Bands, ATR breakout, Keltner | `ATR-brk-1.5`, `Keltner-brk` |
 | **Channel** | Donchian, VWAP reclaim | `Donch20-brk`, `VWAP-reclaim` |
 | **Price Action** | Heikin Ashi, pullback | `HA-reversal`, `EMA-pullback` |
@@ -117,6 +117,17 @@ Each family also has a `+BTCreg` variant that gates entries on the BTC regime cl
 | `scale_out_half_at_1r` | Close 50% at 1R, trail the rest | ✅ |
 
 All 6 are implemented in the simulator. The default sweep uses the 3 marked above; trail-based methods can be enabled with `--exit-methods`.
+
+### Exit-check fidelity (`exit_check`)
+
+The **single biggest backtest trap** is an exit model that doesn't match how the live engine samples price — it can invert your conclusions. `simulate_fast(..., exit_check=...)` (and `run_full_sweep(..., exit_check=...)`) makes the fidelity explicit:
+
+| Mode | The exit sees | Use when the live closer… |
+|------|---------------|---------------------------|
+| `path` *(default)* | the bar's **high and low** — a stop/TP fills when the intra-bar wick touches its level | reconstructs the intra-bar path (e.g. a tick-tight 1m trail) |
+| `discrete` | only each bar's **close**, and fills at that close — intra-bar wicks are invisible | samples one current price per scan cycle |
+
+`path` mode is modelled **worst-case**: a bar's low is tested against the stop carried from *prior* bars **before** that same bar's high can ratchet the trail (a real stop can't use a bar's own high to dodge its own low), and a stop never fills above the bar's own high (gap-through fills at the worse gapped price, not the untouched level). Pick the mode that matches your live closer — mismatching it is how a losing strategy backtests as a winner.
 
 ---
 

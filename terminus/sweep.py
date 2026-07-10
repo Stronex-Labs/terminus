@@ -114,6 +114,7 @@ def run_full_sweep(
     pairs: Iterable[str], tfs: Iterable[str], *,
     days: int = 2920,
     exit_methods: list[str] | None = None,
+    exit_check: str = "path",
     include_regime_wrap: bool = True,
     fee_rate: float = 0.00075,
     min_bars_required: int = 400,
@@ -204,7 +205,8 @@ def run_full_sweep(
                             res = simulate_fast(
                                 pdf, rule, tp, stop, hold, cd,
                                 fee_rate=fee_rate,
-                                exit_method=exit_method, **slip,
+                                exit_method=exit_method,
+                                exit_check=exit_check, **slip,
                             )
                         except Exception as e:
                             errors += 1

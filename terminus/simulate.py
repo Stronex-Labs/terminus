@@ -62,8 +62,25 @@ def simulate_fast(
     latency_bars: int = 0,
     exit_method: str = "fixed_tp_stop",
     atr_mult_trail: float = 3.0,
+    exit_check: str = "path",
 ) -> dict:
-    """Vectorized simulator. Same output shape as simulate_v2."""
+    """Vectorized simulator. Same output shape as simulate_v2.
+
+    exit_check controls the FIDELITY of the exit-check model — it must match how
+    the live engine samples price, or conclusions can invert (the #1 backtest
+    trap, see strategy-lever-lab):
+
+      "path"     — intra-bar path replay: the exit sees the bar's high AND low
+                   (a stop/TP fills at its level when the wick touches it). Use
+                   when the live closer reconstructs the intra-bar path
+                   (e.g. a tick-tight 1m trail).
+      "discrete" — discrete per-cycle sampling: the exit only ever sees the
+                   CLOSE of each bar (the price a scan-loop closer observes), and
+                   fills AT that close. Intra-bar wicks are invisible. Use when
+                   the live closer samples one current price per cycle.
+
+    Same entries, different exit-check model => legitimately different results.
+    """
     n = len(df)
     if n < LOOKBACK_BARS + max_hold_bars + 2:
         return _empty_result()
@@ -112,6 +129,12 @@ def simulate_fast(
         cs = close_arr[entry_i:end]
         ats = atr_arr[entry_i:end]
 
+        # Exit-check fidelity: in discrete mode the closer only ever sees the
+        # CLOSE each cycle (no intra-bar wick), and fills at that close.
+        discrete = (exit_check == "discrete")
+        hi_chk = cs if discrete else hs
+        lo_chk = cs if discrete else ls
+
         # --- Vectorized exit resolution ---
         # For simple fixed_tp_stop we can find the first bar whose low<=stop
         # or high>=tp in a single pass. For path-dependent trailing exits,
@@ -125,9 +148,10 @@ def simulate_fast(
 
         if exit_method == "fixed_tp_stop":
             # Either bar first touches stop OR tp. Stop takes precedence if both
-            # in same bar (conservative).
-            stop_hits = np.where(ls <= initial_stop)[0]
-            tp_hits = np.where(hs >= initial_tp)[0]
+            # in same bar (conservative). Discrete fills at the observed close;
+            # path fills at the stop/tp level the wick traded through.
+            stop_hits = np.where(lo_chk <= initial_stop)[0]
+            tp_hits = np.where(hi_chk >= initial_tp)[0]
             if len(stop_hits) == 0 and len(tp_hits) == 0:
                 pass
             else:
@@ -135,11 +159,15 @@ def simulate_fast(
                 tp_first = tp_hits[0] if len(tp_hits) else len(ls)
                 if stop_first <= tp_first:
                     exit_offset = stop_first
-                    exit_price = initial_stop * (1 - stop_slip)
+                    # gap-realism: a stop never fills above the bar's own high —
+                    # if the bar gapped entirely below the stop you get the worse
+                    # gapped price, not the untouched level (else a phantom fill).
+                    _fill = cs[stop_first] if discrete else min(initial_stop, hs[stop_first])
+                    exit_price = _fill * (1 - stop_slip)
                     exit_reason = "STOP"
                 else:
                     exit_offset = tp_first
-                    exit_price = initial_tp * (1 - tp_slip)
+                    exit_price = (cs[tp_first] if discrete else initial_tp) * (1 - tp_slip)
                     exit_reason = "TP"
 
         else:
@@ -149,10 +177,34 @@ def simulate_fast(
             breakeven_armed = False
 
             for k in range(len(hs)):
-                high = hs[k]
-                low = ls[k]
-                running_high = max(running_high, high)
+                high = hi_chk[k]
+                low = lo_chk[k]
 
+                # WORST-CASE intra-bar ordering: test this bar's LOW against the
+                # stop carried from PRIOR bars BEFORE this bar's HIGH can ratchet
+                # the trail (the ratchet is deferred to the bottom of the loop, so
+                # it only protects the NEXT bar). A real stop can't use a bar's own
+                # high to dodge its own low — ratchet-then-check is the classic
+                # optimistic path-replay bug (strategy-lever-lab closer-fidelity).
+                if low <= current_stop:
+                    exit_offset = k
+                    # gap-realism: never fill above THIS bar's high — a gap-through
+                    # fills at the (worse) gapped price, not the untouched level.
+                    _fill = cs[k] if discrete else min(current_stop, high)
+                    exit_price = _fill * (1 - stop_slip)
+                    exit_reason = ("STOP" if current_stop <= initial_stop * 1.0001
+                                   else "TRAIL")
+                    break
+                # fixed TP check (level is order-independent; stop takes precedence)
+                if exit_method in ("fixed_tp_stop", "breakeven_after_1r",
+                                    "fixed_with_breakeven") and high >= initial_tp:
+                    exit_offset = k
+                    exit_price = (cs[k] if discrete else initial_tp) * (1 - tp_slip)
+                    exit_reason = "TP"
+                    break
+
+                # --- advance peak + trailing stop, for the NEXT bar only ---
+                running_high = max(running_high, high)
                 if exit_method in ("atr_trail", "chandelier_trail"):
                     if not np.isnan(ats[k]):
                         trail = running_high - atr_mult_trail * ats[k]
@@ -182,21 +234,6 @@ def simulate_fast(
                         trail = running_high - atr_mult_trail * ats[k]
                         if trail > current_stop:
                             current_stop = trail
-
-                # stop check first
-                if low <= current_stop:
-                    exit_offset = k
-                    exit_price = current_stop * (1 - stop_slip)
-                    exit_reason = ("STOP" if current_stop <= initial_stop * 1.0001
-                                   else "TRAIL")
-                    break
-                # fixed TP check
-                if exit_method in ("fixed_tp_stop", "breakeven_after_1r",
-                                    "fixed_with_breakeven") and high >= initial_tp:
-                    exit_offset = k
-                    exit_price = initial_tp * (1 - tp_slip)
-                    exit_reason = "TP"
-                    break
 
         if exit_offset is None:
             exit_offset = len(hs) - 1

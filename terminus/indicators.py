@@ -46,6 +46,11 @@ def precompute_all(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_up"] = bb[bbu]
     df["bb_width"] = (bb[bbu] - bb[bbl]) / bb[bbm]
     df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+    # ADX(14) — required by Mom-ADX-surge and Mom-sniper. Without this column
+    # those families silently never fire (_col returns NaN -> valid mask all-False).
+    _adx = ta.adx(df["high"], df["low"], df["close"], length=14)
+    df["adx"] = (_adx["ADX_14"] if _adx is not None and "ADX_14" in _adx.columns
+                 else np.nan)
     df["donch_hi20"] = df["high"].rolling(20).max()
     df["donch_hi50"] = df["high"].rolling(50).max()
     df["donch_lo20"] = df["low"].rolling(20).min()
