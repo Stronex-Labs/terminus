@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://stronex-labs.github.io/terminus/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+    <url>
+         <loc>https://stronex-labs.github.io/terminus/cli-reference/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+    <url>
+         <loc>https://stronex-labs.github.io/terminus/exit-check-fidelity/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+    <url>
+         <loc>https://stronex-labs.github.io/terminus/quickstart/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+    <url>
+         <loc>https://stronex-labs.github.io/terminus/strategy-families/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+</urlset>
