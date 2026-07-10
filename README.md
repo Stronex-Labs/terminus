@@ -56,6 +56,7 @@ Most backtesting tools make it easy to overfit. Terminus makes it **hard to chea
 - **Bear years count.** 2022 was -64% on BTC. Your strategy survives that or it doesn't ship.
 - **Multi-pair generalization.** Works on one pair? That's a curve fit. Terminus requires success across at least 5 pairs.
 - **Realistic execution.** Tiered slippage by market cap, maker/taker fees, cooldowns, max-hold timeouts.
+- **Exit-model fidelity.** The #1 silent backtest trap: an exit that fills on intra-bar wicks your live engine never sees. Terminus makes it explicit — `exit_check=path|discrete` — models `path` mode **worst-case** (a bar's high can't ratchet the stop in time to dodge its own low) and never fills above the bar's high. Match your live closer, or the edge is fiction.
 - **Halal-first.** Spot-only, no leverage, no shorts, no interest. Cash is a valid position.
 - **Content-hashed cache.** Every sim keyed by `SHA-256(pair + tf + config + dates + slippage + fee)`. Same inputs = instant hit.
 
@@ -293,6 +294,7 @@ terminus sweep [OPTIONS]
 | `--tfs` | All 8 timeframes | Comma-separated timeframes |
 | `--days` | `2920` | Data window (days) |
 | `--exit-methods` | `fixed_tp_stop` | Comma-separated exit methods |
+| `--exit-check` | `path` | Exit-model fidelity: `path` (intra-bar wicks) or `discrete` (per-cycle close). Match your live closer. |
 | `--no-regime` | off | Skip `+BTCreg` variants |
 | `--label` | auto | Manifest label for this run |
 

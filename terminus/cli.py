@@ -161,6 +161,7 @@ def cmd_sweep(args):
     summary = run_full_sweep(
         pairs=pairs, tfs=tfs, days=args.days,
         exit_methods=exit_methods,
+        exit_check=args.exit_check,
         include_regime_wrap=not args.no_regime,
         label=args.label,
     )
@@ -415,6 +416,9 @@ def main():
     s.add_argument("--tfs", default=",".join(DEFAULT_TFS))
     s.add_argument("--days", type=int, default=2920)
     s.add_argument("--exit-methods", default="fixed_tp_stop")
+    s.add_argument("--exit-check", default="path", choices=["path", "discrete"],
+                   help="Exit-model fidelity: 'path' (intra-bar wicks, default) "
+                        "or 'discrete' (per-cycle close sampling). Match your live closer.")
     s.add_argument("--no-regime", action="store_true")
     s.add_argument("--label", default=None)
     s.set_defaults(func=cmd_sweep)

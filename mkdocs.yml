@@ -1,0 +1,46 @@
+site_name: Terminus
+site_description: Ruthless backtesting lab for long-only spot crypto strategies — walk-forward validation, exit-model fidelity, and halal-first spot-only execution.
+site_url: https://stronex-labs.github.io/terminus/
+repo_url: https://github.com/Stronex-Labs/terminus
+repo_name: Stronex-Labs/terminus
+copyright: MIT Licensed
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Exit-Model Fidelity: exit-check-fidelity.md
+  - Strategy Families: strategy-families.md
+  - CLI Reference: cli-reference.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
