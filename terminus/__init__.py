@@ -13,7 +13,7 @@ ML (requires pip install terminus-lab[ml]):
 """
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from .store import ResearchStore, SimRecord, get_store, hash_config
 from .simulate import simulate_fast as simulate

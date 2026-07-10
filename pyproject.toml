@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "terminus-lab"
-version = "0.3.0"
+version = "0.3.1"
 description = "End of All Trades. Ruthless backtesting lab for long-only spot strategies."
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,8 +13,13 @@ authors = [
 ]
 requires-python = ">=3.10"
 keywords = [
-    "backtest", "crypto", "trading", "walk-forward", "spot",
-    "halal", "shariah", "quantitative", "strategy",
+    "backtest", "backtesting", "backtester", "crypto", "cryptocurrency",
+    "trading", "trading-bot", "trading-strategies", "walk-forward", "spot",
+    "halal", "shariah", "binance",
+    "quant", "quantitative", "quantitative-trading", "quantitative-finance",
+    "systematic-trading", "algorithmic-trading", "algo-trading",
+    "vibe-trading", "vibe-coding", "ai-trading", "llm-trading",
+    "strategy", "trading-strategy", "trading-algorithms",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

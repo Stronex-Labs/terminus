@@ -58,6 +58,8 @@ Most backtesting tools make it easy to overfit. Terminus makes it **hard to chea
 - **Realistic execution.** Tiered slippage by market cap, maker/taker fees, cooldowns, max-hold timeouts.
 - **Exit-model fidelity.** The #1 silent backtest trap: an exit that fills on intra-bar wicks your live engine never sees. Terminus makes it explicit — `exit_check=path|discrete` — models `path` mode **worst-case** (a bar's high can't ratchet the stop in time to dodge its own low) and never fills above the bar's high. Match your live closer, or the edge is fiction.
 - **Halal-first.** Spot-only, no leverage, no shorts, no interest. Cash is a valid position.
+
+> **Vibe-coded a strategy with an LLM?** Terminus is the reality check. Point it at your AI-generated rule and it tells you — with walk-forward and honest fills — whether it survives, before you risk a dollar. Rigor is the layer *between* the vibe and the live account.
 - **Content-hashed cache.** Every sim keyed by `SHA-256(pair + tf + config + dates + slippage + fee)`. Same inputs = instant hit.
 
 ---
